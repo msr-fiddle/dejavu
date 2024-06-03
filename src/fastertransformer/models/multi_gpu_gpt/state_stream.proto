@@ -1,0 +1,20 @@
+syntax = "proto2";
+
+package dejavu;
+
+message PushRequest {}
+
+message PushResponse {
+	required int32 slot_id = 1;
+}
+
+message CompleteRequest {
+	required int32 slot_id = 1;
+}
+
+message CompleteResponse {}
+
+service DejaVuManager {
+	rpc Push(PushRequest) returns (PushResponse) {}
+	rpc Complete(CompleteRequest) returns (CompleteResponse) {}
+}

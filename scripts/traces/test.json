@@ -1,0 +1,8 @@
+{
+"traceEvents": [
+{ "pid":1, "ts":1, "dur":100000, "ph":"X", "name":"A", "cname": "thread_state_uninterruptible"},
+{ "pid":1, "ts":1, "dur":50000, "ph":"X", "name":"B", "cname": "thread_state_iowait"}
+],
+"meta_user": "aras",
+"meta_cpu_count": "8"
+}

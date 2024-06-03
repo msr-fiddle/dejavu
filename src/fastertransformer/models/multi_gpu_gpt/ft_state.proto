@@ -1,0 +1,75 @@
+syntax = "proto2";
+
+package dejavu_ft;
+
+message ResetRequest {}
+message ResetResponse {}
+
+message HeartBeatRequest {
+    required int32 rank = 1;
+}
+
+message HeartBeatResponse {
+    required bool reset = 1;
+}
+
+message StartUpInfoRequest {
+    required int32 rank = 1;
+}
+
+message StartUpInfoResponse {
+    required bool has_failed = 1;
+    required bool stream_cache_next = 2;
+    required bool stream_cache_prev = 3;
+    repeated int32 ubatch_global_ids = 4;
+    repeated int32 ubatch_steps = 5;
+    repeated int32 prompts_seen = 6;
+}
+
+message CacheRequest {
+	required int32 rank = 1;
+    required int32 ubatch_id = 2;
+    required int32 step = 3;
+}
+
+message CacheResponse {}
+
+message TokenRequest {
+    required int32 ubatch_id = 1;
+    required int32 pp_id = 2;
+    repeated int32 tokens = 3;
+}
+
+message TokenResponse {}
+
+message UbatchFinishedRequest {
+    required int32 rank = 1;
+    repeated int32 ubatch_id = 2;
+    repeated int32 pp_id = 3;
+}
+
+message UbatchFinishedResponse {}
+
+message IsReadyRequest {
+    required int32 rank = 1;
+}
+
+message IsReadyResponse {}
+
+message IsRestartRequest {
+    required int32 rank = 1;
+}
+
+message IsRestartResponse {}
+
+service Controller {
+	rpc SendHeartbeat(HeartBeatRequest) returns (HeartBeatResponse) {}
+	rpc SendCacheAck(CacheRequest) returns (CacheResponse) {}
+    rpc SendToken(TokenRequest) returns (TokenResponse) {}
+    rpc GetInfo(StartUpInfoRequest) returns (StartUpInfoResponse) {}
+    rpc Reset(ResetRequest) returns (ResetResponse) {}
+    rpc MarkUbatchFinished(UbatchFinishedRequest) returns (UbatchFinishedResponse) {}
+    rpc IsReady(IsReadyRequest) returns (IsReadyResponse) {}
+    rpc MarkRestart(IsRestartRequest) returns (IsRestartResponse) {}
+
+}

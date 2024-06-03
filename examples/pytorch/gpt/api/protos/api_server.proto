@@ -1,0 +1,25 @@
+syntax = "proto3";
+package dejavu_api;
+
+message InferenceRequest {
+    repeated int32 input_ids = 1;
+    repeated int32 input_lengths = 2;
+    repeated int32 output_lengths = 3;
+    repeated int32 ubatch_ids = 4;
+}
+
+message InferenceRequestUbatch {
+    int32 ubatch_id = 1;
+    repeated int32 input_ids = 2;
+    repeated int32 input_lengths = 3;
+    repeated int32 output_lengths = 4;
+}
+
+message InferenceResponse {}
+message InferenceResponseOpen {}
+
+
+service ApiServer {
+  rpc Serve(InferenceRequest) returns (InferenceResponse) {}
+  rpc ServeOpen(InferenceRequestUbatch) returns (InferenceResponseOpen) {}
+}
