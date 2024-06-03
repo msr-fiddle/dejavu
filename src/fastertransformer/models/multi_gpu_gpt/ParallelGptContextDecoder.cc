@@ -451,7 +451,7 @@ void ParallelGptContextDecoder<T>::copy_kv_cache_ubatch_layer(
         (*host_address_)[0] + slot_offset + total_cache_size
     };
 #endif
-    (*cache_manager_)->scatter_out(task);
+    (*cache_manager_)->stream_out(task);
 }
 
 template<typename T>

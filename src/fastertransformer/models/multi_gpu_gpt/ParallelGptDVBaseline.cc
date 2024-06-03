@@ -744,7 +744,7 @@ void ParallelGptDVBaseline<T>::evict_cache(size_t step, int local_batch_size, in
                        pipeline_para_.rank_,
                        (char*)(mapped_host_addr_[ubatch_id]),
                        (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
-    cache_manager_->scatter_out(task);
+    cache_manager_->stream_out(task);
 
     // cudaStreamSynchronize(flush_key_stream_);
     // cudaStreamSynchronize(flush_value_stream_);
@@ -1671,7 +1671,7 @@ void ParallelGptDVBaseline<T>::forward(std::unordered_map<std::string, Tensor>* 
                            pipeline_para_.rank_,
                            mapped_host_addr_[0],
                            mapped_host_addr_[0] + total_cache_size_};
-        cache_manager_->scatter_in(task);
+        cache_manager_->stream_in(task);
 
         CUDACHECK(cudaEventRecord(*key_swapping_events_[0], fetch_key_stream_));
         CUDACHECK(cudaEventRecord(*value_swapping_events_[0], fetch_value_stream_));
@@ -1753,7 +1753,7 @@ void ParallelGptDVBaseline<T>::forward(std::unordered_map<std::string, Tensor>* 
                                    pipeline_para_.rank_,
                                    mapped_host_addr_[idx_to_fetch],
                                    mapped_host_addr_[idx_to_fetch] + total_cache_size_};
-                cache_manager_->scatter_in(task);
+                cache_manager_->stream_in(task);
 
                 printf("Rank %d, ite %d, num_ubatches: %d, idx_to_fetch is %d, FETCH UP TO %d, slot %d\n", cache_stream_para_.rank_, ite, num_microbatches, idx_to_fetch, ubatch_step_[idx_to_fetch] - 1,  (ite + 1) % num_slots_);
 
@@ -1767,7 +1767,7 @@ void ParallelGptDVBaseline<T>::forward(std::unordered_map<std::string, Tensor>* 
                             pipeline_para_.rank_,
                             mapped_host_addr_[idx_to_fetch],
                             mapped_host_addr_[idx_to_fetch] + total_cache_size_};
-                cache_manager_->scatter_in(task);
+                cache_manager_->stream_in(task);
 
                 cudaEventRecord(*key_swapping_events_[idx_to_fetch], fetch_key_stream_);
                 cudaEventRecord(*value_swapping_events_[idx_to_fetch], fetch_value_stream_);

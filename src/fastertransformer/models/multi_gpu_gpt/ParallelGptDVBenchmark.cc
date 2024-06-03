@@ -241,11 +241,11 @@ void ParallelGptDVBenchmark<T>::copy_cache_decode(size_t step, int local_batch_s
                        recv_rank,
                        (char*)(mapped_host_addr_[ubatch_id]),
                        (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
-    cache_manager_->scatter_out(task);
+    cache_manager_->stream_out(task);
 #elif defined(NCCL_SEND)
     printf("Send cache for step %d\n", step);
     StreamInfo task = {layers, ubatch_id, local_batch_size, (int)step, (int)(step + 1), false, recv_rank, NULL, NULL};
-    cache_manager_->scatter_out(task);
+    cache_manager_->stream_out(task);
 #endif
     CUDACHECK(cudaStreamSynchronize(flush_key_stream_));
     CUDACHECK(cudaStreamSynchronize(flush_value_stream_));
@@ -302,7 +302,7 @@ void ParallelGptDVBenchmark<T>::read_state(int num_microbatches, int prompt_size
                        pipeline_para_.rank_,
                        (char*)(mapped_host_addr_[ubatch_id]),
                        (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
-    cache_manager_->scatter_in(task);
+    cache_manager_->stream_in(task);
 
     task = {layers,
             ubatch_id,
@@ -313,7 +313,7 @@ void ParallelGptDVBenchmark<T>::read_state(int num_microbatches, int prompt_size
             pipeline_para_.rank_,
             (char*)(mapped_host_addr_[ubatch_id]),
             (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
-    cache_manager_->scatter_in(task);
+    cache_manager_->stream_in(task);
 }
 
 template<typename T>
@@ -331,7 +331,7 @@ void ParallelGptDVBenchmark<T>::receive_cache_ubatch_layer(size_t prompt_size,
 
 #ifdef NCCL_SEND
     StreamInfo task = {layers, microbatch_id, local_batch_size, 0, prompt_size, true, send_rank, NULL, NULL};
-    cache_manager_->scatter_in(task);
+    cache_manager_->stream_in(task);
 #elif MPI_SEND
     if (baseline_ == 0) {
         StreamInfo task = {layers,
@@ -374,7 +374,7 @@ void ParallelGptDVBenchmark<T>::receive_cache_ubatch_step(size_t step,
 #ifdef NCCL_SEND
     StreamInfo task = {
         layers, microbatch_id, local_batch_size, (int)step, (int)(step + 1), false, send_rank, NULL, NULL};
-    cache_manager_->scatter_in(task);
+    cache_manager_->stream_in(task);
 #elif MPI_SEND
     printf("--------------- [RECEIVE] for step %d\n", step);
     if (baseline_ == 0) {

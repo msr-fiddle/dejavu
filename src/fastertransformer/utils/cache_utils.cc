@@ -330,7 +330,7 @@ void BaseCacheManager::scatter(StreamInfo args)
     }
 }
 
-void BaseCacheManager::scatter_in(StreamInfo args)
+void BaseCacheManager::stream_in(StreamInfo args)
 {
     if (!args.is_prompt || prompt_config_.is_same(token_config_)) {
         // TODO: check this
@@ -364,7 +364,7 @@ void BaseCacheManager::scatter_in(StreamInfo args)
     }
 }
 
-void BaseCacheManager::scatter_out(StreamInfo args)
+void BaseCacheManager::stream_out(StreamInfo args)
 {
     if (!args.is_prompt || prompt_config_.is_same(token_config_)) {
         // TODO: check this

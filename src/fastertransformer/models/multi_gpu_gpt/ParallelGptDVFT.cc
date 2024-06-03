@@ -852,7 +852,7 @@ void ParallelGptDVFT<T>::receive_cache_ubatch(
 
     StreamInfo task = {
         layers, cache_id, local_batch_size, 0, prompt_size, true, 0, start_addr, start_addr + total_cache_size_};
-    ds_cache_manager_->scatter_in(task);
+    ds_cache_manager_->stream_in(task);
     CUDACHECK(cudaDeviceSynchronize());
 
     memcpy((char*)(mapped_host_addr_[ubatch_id]), start_addr, prompt_cache_size_);
@@ -881,7 +881,7 @@ void ParallelGptDVFT<T>::copy_token_to_replica(int start_step, int ubatch_id, in
                        0,
                        (char*)(mapped_host_addr_[ubatch_id]),
                        (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
-    local_cache_manager_->scatter_out(task);
+    local_cache_manager_->stream_out(task);
 
     printf("************************ [SENDER %d] Send token for step %d, ubatch id %d, to rank %d\n",
            cache_stream_para_.rank_,
@@ -1381,7 +1381,7 @@ void ParallelGptDVFT<T>::exchangeCaches(int start_step, int num_microbatches, in
                                    0,
                                    (char*)(mapped_host_addr_[i]),
                                    (char*)(mapped_host_addr_[i]) + total_cache_size_};
-                ds_cache_manager_->scatter_in(task);
+                ds_cache_manager_->stream_in(task);
 
                 if (start_step > prompt_size) {
                     task = {layers,
@@ -1393,7 +1393,7 @@ void ParallelGptDVFT<T>::exchangeCaches(int start_step, int num_microbatches, in
                             0,
                             (char*)(mapped_host_addr_[i]),
                             (char*)(mapped_host_addr_[i]) + total_cache_size_};
-                    ds_cache_manager_->scatter_in(task);
+                    ds_cache_manager_->stream_in(task);
                     CUDACHECK(cudaDeviceSynchronize());
                 }
             }
@@ -1542,7 +1542,7 @@ void ParallelGptDVFT<T>::swap_cache_out(size_t step, int local_batch_size, int u
                        pipeline_para_.rank_,
                        (char*)(mapped_host_addr_[ubatch_id]),
                        (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
-    swapping_cache_manager_->scatter_out(task);
+    swapping_cache_manager_->stream_out(task);
 }
 
 template<typename T>
@@ -1575,7 +1575,7 @@ void ParallelGptDVFT<T>::swap_cache_in(int ubatch_id, int local_batch_size, int 
                        pipeline_para_.rank_,
                        mapped_host_addr_[idx_to_fetch],
                        mapped_host_addr_[idx_to_fetch] + total_cache_size_};
-    swapping_cache_manager_->scatter_in(task);
+    swapping_cache_manager_->stream_in(task);
 
     // printf("Rank %d, ite %d, num_ubatches: %d, idx_to_fetch is %d, FETCH UP TO %d, slot %d\n",
     //        cache_stream_para_.rank_,
@@ -1595,7 +1595,7 @@ void ParallelGptDVFT<T>::swap_cache_in(int ubatch_id, int local_batch_size, int 
             pipeline_para_.rank_,
             mapped_host_addr_[idx_to_fetch],
             mapped_host_addr_[idx_to_fetch] + total_cache_size_};
-    swapping_cache_manager_->scatter_in(task);
+    swapping_cache_manager_->stream_in(task);
 
     cudaEventRecord(*key_swapping_events_[idx_to_fetch], fetch_key_stream_);
     cudaEventRecord(*value_swapping_events_[idx_to_fetch], fetch_value_stream_);

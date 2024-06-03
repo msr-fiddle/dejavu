@@ -158,8 +158,8 @@ public:
     void gather(StreamInfo args);
     void scatter(StreamInfo args);
 
-    void scatter_in(StreamInfo args);
-    void scatter_out(StreamInfo args);
+    void stream_in(StreamInfo args);
+    void stream_out(StreamInfo args);
 
     void sync_streams();
 };
