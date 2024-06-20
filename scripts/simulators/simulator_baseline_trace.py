@@ -65,27 +65,17 @@ def generate_timestamps(size, rps, num_peers):
     return req_start_times
 
 
-def create_trace(args):
-    events = []
-    with open(args.trace_file, 'r') as f:
-        trace_list = json.load(f)
+def simulate(trace_list, rps, num_machines, prompt_time, token_time):
 
-    trace_list = [min(max(x[1],2),200) for x in trace_list[:500]]
-    # trace_list_new = []
-    # for x in trace_list:
-    #     for i in range(1):
-    #         trace_list_new.append(x)
-    # trace_list = trace_list_new
-    print(len(trace_list), np.average(trace_list))
+    prompt_time_us = prompt_time * 1000
+    token_time_us = token_time * 1000
 
-    prompt_time_us = args.prompt_time * 1000
-    token_time_us = args.token_time * 1000
-
-    req_start_times = generate_timestamps(len(trace_list), args.rps, args.num_machines)
+    req_start_times = generate_timestamps(len(trace_list), rps, num_machines)
     req_end_times = [0]*len(trace_list)
 
-    batches = args.num_machines
+    batches = num_machines
     active_queue = []
+    events = []
 
     # cur_start = 0
     # real_starts = req_start_times
@@ -101,44 +91,45 @@ def create_trace(args):
         active_queue.append(BatchInfo(0, i, True, i*prompt_time_us, trace_list[i], trace_list[i]))
     trace_idx = batches
 
-    cur_time = [0]*args.num_machines
+    cur_time = [0]*num_machines
     max_time = 0
+    early_stops = 0
 
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 0,
-            "args": {
-                "name" : "Stage 1",
-            }
-        }
-    )
+    # events.append(
+    #     {
+    #         "name": "process_name", "ph": "M", "pid": 0,
+    #         "args": {
+    #             "name" : "Stage 1",
+    #         }
+    #     }
+    # )
 
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 1,
-            "args": {
-                "name" : "Stage 2"
-            }
-        }
-    )
+    # events.append(
+    #     {
+    #         "name": "process_name", "ph": "M", "pid": 1,
+    #         "args": {
+    #             "name" : "Stage 2"
+    #         }
+    #     }
+    # )
 
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 2,
-            "args": {
-                "name" : "Stage 3"
-            }
-        }
-    )
+    # events.append(
+    #     {
+    #         "name": "process_name", "ph": "M", "pid": 2,
+    #         "args": {
+    #             "name" : "Stage 3"
+    #         }
+    #     }
+    # )
 
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 3,
-            "args": {
-                "name" : "Stage 4"
-            }
-        }
-    )
+    # events.append(
+    #     {
+    #         "name": "process_name", "ph": "M", "pid": 3,
+    #         "args": {
+    #             "name" : "Stage 4"
+    #         }
+    #     }
+    # )
 
     while (len(active_queue) > 0):
         # min_ts = active_queue[0].start_time
@@ -152,12 +143,12 @@ def create_trace(args):
 
         sleep = True
         for idx,req in enumerate(active_queue):
-            if req.prompt and cur_time[0] < req.start_time:
-                continue
-            else:
-                active_queue.pop(idx)
-                sleep = False
-                break
+            # if req.prompt and cur_time[0] < req.start_time:
+            #     continue
+            # else:
+            active_queue.pop(idx)
+            sleep = False
+            break
 
         if sleep:
             cur_time[0] = req_start_times[trace_idx-1]
@@ -181,23 +172,28 @@ def create_trace(args):
         cur_time[req.stage] = max(req.start_time, cur_time[req.stage])
         cur_time[req.stage] += prompt_time_us if req.prompt else token_time_us
 
-        next_stage = (req.stage + 1) % args.num_machines
+        next_stage = (req.stage + 1) % num_machines
         new_req = None
 
         if req.prompt:
-            if req.stage < args.num_machines - 1:
+            if req.stage < num_machines - 1:
                 new_req = BatchInfo(next_stage, req.batch, True, cur_time[req.stage], req.tokens, req.initial_tokens)
             else:
                 new_req = BatchInfo(next_stage, req.batch, False, cur_time[req.stage], req.tokens, req.initial_tokens)
 
         else:
-            if req.stage < args.num_machines - 1:
+            if req.stage < num_machines - 1:
                 new_req = BatchInfo(next_stage, req.batch, False, cur_time[req.stage], req.tokens, req.initial_tokens)
             else:
                 if req.tokens > 1:
                     new_req = BatchInfo(next_stage, req.batch, False, cur_time[req.stage], req.tokens-1, req.initial_tokens)
                 else:
                     req_end_times[req.batch] = cur_time[req.stage]
+                    for r in active_queue:
+                        if (r.tokens > 2):
+                            early_stops += 1
+                            break
+
                     if trace_idx < len(trace_list):
                         new_req = BatchInfo(0, trace_idx, True, max(cur_time[0], req_start_times[trace_idx]), trace_list[trace_idx], trace_list[trace_idx])
                         trace_idx += 1
@@ -219,9 +215,22 @@ def create_trace(args):
     print("LAT/TOKEN: ", np.median(norm_lat),max(norm_lat), min(norm_lat))
 
     max_time = max(req_end_times)
+    print(f"------------------------------------------------ Early stops is {early_stops}")
     print(f"Total time is {max_time/1e6} sec, thr is {len(trace_list)/(max_time/1e6)} ubatces/sec")
+    return max_time/1e6
 
 
 if __name__ == "__main__":
-    userargs = parser.parse_args()
-    create_trace(userargs)
+    args = parser.parse_args()
+    events = []
+    with open(args.trace_file, 'r') as f:
+        trace_list = json.load(f)
+
+    trace_list = [min(max(x[1],2),1000) for x in trace_list[:512]]
+    # trace_list_new = []
+    # for x in trace_list:
+    #     for i in range(2):
+    #         trace_list_new.append(x)
+    # trace_list = trace_list_new
+    print(len(trace_list), np.average(trace_list))
+    simulate(trace_list, args.rps, args.num_machines, args.prompt_time, args.token_time)

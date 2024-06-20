@@ -55,6 +55,9 @@ mpirun -n N -hostfile <hostfile> -x DEJAVU_CONTROLLER_IP=<CONTROLLER_IP> python 
 
 ```
 
+* To read a file trace (e.g. the LMSys dataset used in the DéjàVu paper), add `--input_sizes_file filename`  when starting the controller. The file *filename* is a JSON file, containing a list of [*prompt_size*, *num_generated_tokens*].
+* To submit requests (prompts) following a Poisson distribution (with rps *r*), add `--poisson --rps r`    when starting the controller.
+
 2. Run with disaggregation:
 
 We assume we have *N* workers, tensor parallelism degree *Y*, microbatch size *b*, and we serve *X* requests.
