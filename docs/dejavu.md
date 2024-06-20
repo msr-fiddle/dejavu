@@ -12,9 +12,9 @@ TODO: add figure
 
 For the following configurations:
 1. We expect the worker of rank 0 has password-less access to all other workers (via SSH).
-2. In the following, replace <CONTROLLER_IP> with the IP address of the controller.
-3. Create a </tmp/ip_info> file containing all workers' IP addresses, one IP address at each line. Note that if one machine has 2 workers (e.g. TMP=2), you need to add the IP address of the machine twice.
-4. We are under the <dejavu/build> directory.
+2. In the following, replace *CONTROLLER_IP* with the IP address of the controller.
+3. Create a */tmp/ip_info* file containing all workers' IP addresses, one IP address at each line. Note that if one machine has 2 workers (e.g. TMP=2), you need to add the IP address of the machine twice.
+4. We are under the *dejavu/build* directory.
 
 ## Compiling with MPI
 
@@ -40,8 +40,8 @@ You might also want to enforce MPI to not use specific interfaces:
 
 1. Run baseline:
 
-We assume we have <N> workers, tensor parallelism degree <Y>, microbatch size <b>, and we serve <X> requests.
-All requests have prompt size <P>.
+We assume we have *N* workers, tensor parallelism degree *Y*, microbatch size *b*, and we serve *X* requests.
+All requests have prompt size *P*.
 
 ```bash
 
@@ -49,7 +49,7 @@ cmake -DSM=xx -DCMAKE_BUILD_TYPE=Release -DBUILD_PYT=ON -DBUILD_MULTI_GPU=ON -DB
 
 make -j12
 
-python ../examples/pytorch/gpt/controller_open_loop.py --num_peers N --num_prompt_peers 0 --num_token_peers N --tensor_parallelism Y --controller_ip <CONTROLLER_IP> --workers_ip_file /tmp/ip_info --ubatch_size b  --num_requests X --input_len P # to start the controller
+python ../examples/pytorch/gpt/controller_open_loop.py --num_peers N --num_prompt_peers 0 --num_token_peers N --tensor_parallelism Y --controller_ip CONTROLLER_IP --workers_ip_file /tmp/ip_info --ubatch_size b  --num_requests X --input_len P # to start the controller
 
 mpirun -n N -hostfile <hostfile> -x DEJAVU_CONTROLLER_IP=<CONTROLLER_IP> python ../examples/pytorch/gpt/api_worker_open.py --tensor_para_size=Y --prompt_pipeline_para_size=0 --token_pipeline_para_size=N//Y --ckpt_path <path_to_model> --backend mpi --weights_data_type fp16 --inference_data_type fp16 --ubatch_size b --num_requests X --input_len P
 
@@ -57,8 +57,8 @@ mpirun -n N -hostfile <hostfile> -x DEJAVU_CONTROLLER_IP=<CONTROLLER_IP> python 
 
 2. Run with disaggregation:
 
-We assume we have <N> workers, tensor parallelism degree <Y>, microbatch size <b>, and we serve <X> requests.
-We have <M> workers doing prompt processing, and <K> workers doing token generation.
+We assume we have *N* workers, tensor parallelism degree *Y*, microbatch size *b*, and we serve *X* requests.
+We have *M* workers doing prompt processing, and *K* workers doing token generation.
 
 ```bash
 
@@ -98,7 +98,7 @@ python ../examples/pytorch/gpt/controller_open_loop.py --num_peers N --num_promp
 
 ```
 
-At each worker <i>:
+At each worker *i*:
 
 ```bash
 

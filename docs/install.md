@@ -112,7 +112,7 @@ rm -rf $HOME/pytorch/torch/include/google/
 
 9. Install DéjàVu (Replace 'xx' at the cmake command with the compute capability of your GPU).
 We provide a set of compile flags for different use cases.
-Please look at [](), []() and []() for more details.
+Please look at [docs/dejavulib](docs/dejavulib.md), [docs/dejavu](docs/dejavu.md) for more details.
 
 
 ```bash
@@ -138,7 +138,7 @@ make -j12
 
 ### Run a simple example
 
-Download and convert the model as needed, following the instructions[here](https://github.com/msr-fiddle/dejavu/blob/fot/main/docs/original_ft/gpt_guide.md#download-huggingface-gpt-model-and-convert).
+Download and convert the model as needed, following the instructions [here](https://github.com/msr-fiddle/dejavu/blob/fot/main/docs/original_ft/gpt_guide.md#download-huggingface-gpt-model-and-convert).
 
 We assume we are at the path 'dejavu/build'. The following command will run a single-GPU example:
 

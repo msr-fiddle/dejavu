@@ -32,7 +32,7 @@ We support the following: (currently tested for the GPT, OPT and BLOOM models)
 3. DéjàVu serving system documentation and benchmarks: Check [docs/dejavu](docs/dejavu.md)
 4. DéjàVu Planner documentation: Check [docs/dejavu_planner](docs/dejavu_planner.md)
 5. DéjàVu simulator: Check [docs/dejavu_simulator](docs/dejavu_simulator.md)
-6. For FasterTransformer original documentation: Check [docs/original_ft](docs/original_ft.md)
+6. For FasterTransformer original documentation: Check [docs/original_ft](docs/original_ft)
 
 ## Paper
 If you use DéjàVu or DéjàVuLib in your research, please cite our paper:
