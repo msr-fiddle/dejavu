@@ -112,7 +112,7 @@ rm -rf $HOME/pytorch/torch/include/google/
 
 9. Install DéjàVu (Replace 'xx' at the cmake command with the compute capability of your GPU).
 We provide a set of compile flags for different use cases.
-Please look at [docs/dejavulib](docs/dejavulib.md), [docs/dejavu](docs/dejavu.md) for more details.
+Please look at [dejavulib.md](dejavulib.md), [dejavu.md](dejavu.md) for more details.
 
 
 ```bash

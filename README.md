@@ -27,11 +27,11 @@ We support the following: (currently tested for the GPT, OPT and BLOOM models)
 
 ## Documentation
 
-1. Installation: Check [docs/install](docs/install.md)
-2. DéjàVuLib documentation and microbenchmarks: Check [docs/dejavulib](docs/dejavulib.md)
-3. DéjàVu serving system documentation and benchmarks: Check [docs/dejavu](docs/dejavu.md)
-4. DéjàVu Planner documentation: Check [docs/dejavu_planner](docs/dejavu_planner.md)
-5. DéjàVu simulator: Check [docs/dejavu_simulator](docs/dejavu_simulator.md)
+1. Installation: Check [docs/install.md](docs/install.md)
+2. DéjàVuLib documentation and microbenchmarks: Check [docs/dejavulib.md](docs/dejavulib.md)
+3. DéjàVu serving system documentation and benchmarks: Check [docs/dejavu.md](docs/dejavu.md)
+4. DéjàVu Planner documentation: Check [docs/dejavu_planner.md](docs/dejavu_planner.md)
+5. DéjàVu simulator: Check [docs/dejavu_simulator.md](docs/dejavu_simulator.md)
 6. For FasterTransformer original documentation: Check [docs/original_ft](docs/original_ft)
 
 ## Paper
