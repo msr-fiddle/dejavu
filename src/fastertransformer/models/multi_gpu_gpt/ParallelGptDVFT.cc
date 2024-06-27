@@ -3779,7 +3779,16 @@ void ParallelGptDVFT<T>::cleanup()
 template<typename T>
 void ParallelGptDVFT<T>::reset()
 {
-    printf("Inside ParallelGptDVFT destructor\n");
+    printf("Inside ParallelGptDVFT reset\n");
+
+    if (prompt_only_) {
+        gpt_context_decoder_->thread_done_ = true;
+
+        int num_microbatches = gpt_context_decoder_->stream_threads_.size();
+        for (int i = 0; i < num_microbatches; i++)
+            (gpt_context_decoder_->stream_threads_[i]).join();
+    }
+
     delete gpt_decoder_;
     delete gpt_context_decoder_;
     printf("At ParallelGptDVFT destructor, before freeBuffer\n");

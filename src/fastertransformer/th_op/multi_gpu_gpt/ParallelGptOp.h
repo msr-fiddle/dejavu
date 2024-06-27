@@ -346,9 +346,7 @@ public:
 
     void cleanup() override
     {
-#ifdef TEST_FAILURES
-        gpt_ptr->cleanup();
-#endif
+        gpt_ptr->reset();
     }
 
     void reset() override

@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from protos import api_server_pb2 as protos_dot_api__server__pb2
+from examples.pytorch.gpt.api.protos import api_server_pb2 as protos_dot_api__server__pb2
 
 
 class ApiServerStub(object):

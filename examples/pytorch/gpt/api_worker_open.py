@@ -523,6 +523,11 @@ def main():
                     for i in range(pipeline_para_size):
                         if not finished[i]:
                             rem += 1
+                    print(f"rem is {rem}")
+            elif (rem==0 and scheduled==args.num_requests):
+                print(f"Process {rank}, all requests done!")
+                server.terminate()
+                return
         except Exception:
             print("---- Got an exception! Time to reset!")
             rtime = time.time()
