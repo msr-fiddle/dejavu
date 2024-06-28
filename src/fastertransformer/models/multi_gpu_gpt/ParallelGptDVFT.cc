@@ -3020,7 +3020,7 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
                 if (prompt_world_size_ > 0 && ubatch_step_[ite] == ubatch_step_start_[ite]) {
                     // try to get prompt to work with
                     printf(
-                        "[RANK %d] waiting to get slot id, current slot_id is %d\n", cache_stream_para_.rank_, slot_id);
+                        "[RANK %d] waiting to get slot id for microbatch %d, current slot_id is %d\n", cache_stream_para_.rank_, ite, slot_id);
                     while (1) {
                         dejavu_grpc_service_.written_mtx_.lock();
                         if (!dejavu_grpc_service_.written_queue_.empty()) {

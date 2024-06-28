@@ -484,7 +484,7 @@ def main():
                     input_list.pop(0)
 
             j = 0
-            for i in range(pipeline_para_size):
+            for i in range(num_to_schedule):
                 if finished[i]:
                     cur_input_ids[i] = reqs[j]["input_ids"]
                     cur_input_lengths[i] = reqs[j]["input_lengths"]
@@ -492,15 +492,15 @@ def main():
                     cur_ubatch_ids[i] = reqs[j]["ubatch_id"]
                     j += 1
                     scheduled += 1
+                    finished[i] = 0
 
             # finished = torch.tensor([0]*pipeline_para_size, dtype=torch.uint8)
             # cur_input_ids = [[1]*max_context_len*ubatch_size]*pipeline_para_size
             # cur_input_lengths = [[max_context_len]*ubatch_size]*pipeline_para_size
             # cur_output_lengths = [[200]*ubatch_size]*pipeline_para_size
 
-            print(f"TIMESTAMP {time.time()}, Process {rank} about to schedule! cur_ubatch_ids is {cur_ubatch_ids}")
+            print(f"TIMESTAMP {time.time()}, Process {rank} about to schedule! cur_ubatch_ids is {cur_ubatch_ids}, finished is {finished}")
 
-            finished = torch.tensor([0]*pipeline_para_size, dtype=torch.uint8)
             failure = gpt_generate_fn(model, ubatch_size, max_context_len,  cur_input_ids, cur_input_lengths, cur_output_lengths, finished, cur_ubatch_ids)
             if failure[0] == 1:
                 print(f"Failure is {failure[0]}")
@@ -528,6 +528,8 @@ def main():
                 print(f"Process {rank}, all requests done!")
                 server.terminate()
                 return
+            elif (rem==0 and args.num_requests - scheduled < num_to_schedule):
+                num_to_schedule = args.num_requests - scheduled
         except Exception:
             print("---- Got an exception! Time to reset!")
             rtime = time.time()
