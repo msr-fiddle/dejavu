@@ -116,3 +116,22 @@ export NCCL_COMM_ID=<IP of rank 0>:29512
 python3.8 ../examples/pytorch/gpt/api_worker_open.py  --tensor_para_size=Y --prompt_pipeline_para_size=M//Y --token_pipeline_para_size=K//Y --backend nccl --ckpt_path <path_to_model> --weights_data_type fp16 --inference_data_type fp16 --ubatch_size b --num_requests X --rank i --world_size N --input_len P
 
 ```
+
+
+### Test with failures
+
+Fault-tolerance is supported in the non-MPI version of DéjàVu.
+To showcase DéjàVu's behavior in case of failures, you can:
+
+* Kill all DéjàVu-related processes in a node.
+* The remaining processes will do some cleanup (can be observed from output messages)
+
+Currently, DéjàVu supports only **static** allocation, meaning that the alive processes will wait until the failed process restarts.
+* Restart the failed process by
+
+```bash
+
+python3.8 ../examples/pytorch/gpt/api_worker_open.py  --tensor_para_size=Y --prompt_pipeline_para_size=M//Y --token_pipeline_para_size=K//Y --backend nccl --ckpt_path <path_to_model> --weights_data_type fp16 --inference_data_type fp16 --ubatch_size b --num_requests X --rank i --world_size N --input_len P
+
+```
+changing the variables accordingly, and add the '--restart' and '--failures *F*' option, if this is the *F* inference restart.
