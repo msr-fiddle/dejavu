@@ -19,6 +19,7 @@ parser.add_argument('--trace_file', type=str, default='',
                     help='input trace file')
 parser.add_argument('--rps', type=float, default=0.0,
                     help='rps for Poisson')
+parser.add_argument('--do_traces', action='store_true', help="Create traces of execution")
 
 class BatchInfo:
     def __init__(self, stage, batch, prompt, start_time, tokens) -> None:
@@ -82,66 +83,49 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
     req_end_times = [0]*len(trace_list)
 
     max_time = 0
-    # events.append(
-    #     {
-    #         "name": "process_name", "ph": "M", "pid": 0,
-    #         "args": {
-    #             "name" : "Prompt Pipeline, Stage 1"
-    #         }
-    #     }
-    # )
+    if args.do_traces:
+        for i in range(args.num_prompt_machines):
+            event_i = {
+                "name": "process_name",
+                "ph": "M",
+                "pid": i,
+                "args": {
+                    "name" : f"Prompt Pipeline, Stage {i}",
+                }
+            }
+            events.append(event_i)
 
-    # events.append(
-    #     {
-    #         "name": "process_name", "ph": "M", "pid": 1,
-    #         "args": {
-    #             "name" : "Prompt Pipeline, Stage 2"
-    #         }
-    #     }
-    # )
-
-    # events.append(
-    #     {
-    #         "name": "process_name", "ph": "M", "pid": 2,
-    #         "args": {
-    #             "name" : "Token Pipeline, Stage 1"
-    #         }
-    #     }
-    # )
-
-    # events.append(
-    #     {
-    #         "name": "process_name", "ph": "M", "pid": 3,
-    #         "args": {
-    #             "name" : "Token Pipeline, Stage 2"
-    #         }
-    #     }
-    # )
+        for i in range(args.num_token_machines):
+            event_i = {
+                "name": "process_name",
+                "ph": "M",
+                "pid": args.num_prompt_machines + i,
+                "args": {
+                    "name" : f"Token Pipeline, Stage {i}",
+                }
+            }
+            events.append(event_i)
 
     stime_stage1 = 0
     # 1. prompt processing
     for j in range(len(trace_list)):
         for i in range(num_prompt_machines):
-            # events.append({
-            #     "pid": i,
-            #     "ts": max(req_start_times[j],stime_stage1)+i*(prompt_time_us+cache_time_us),
-            #     "dur": prompt_time_us,
-            #     "ph":"X",
-            #     "name": f"p{j}",
-            #     "cname": trace_colors[i]
-            # })
+            if args.do_traces:
+                events.append({
+                    "pid": i,
+                    "ts": max(req_start_times[j],stime_stage1)+i*(prompt_time_us+cache_time_us),
+                    "dur": prompt_time_us,
+                    "ph":"X",
+                    "name": f"p{j}",
+                    "cname": trace_colors[i]
+                })
 
-            #for k in range(i*token_to_prompt_ratio, (i+1)*token_to_prompt_ratio):
             if i==num_prompt_machines-1:
                 tm = max(req_start_times[j],stime_stage1)+num_prompt_machines*(prompt_time_us+cache_time_us)
                 ready_prompt_queue.append(BatchInfo(0, j, True, tm, trace_list[j]))
                 stime_stage1 = max(req_start_times[j],stime_stage1)+prompt_time_us
-                #ready_prompt_queue.append(BatchInfo(0, j, False, (i+j)*prompt_time_us+prompt_time_us+cache_time_us, trace_list[j]))
 
-
-    #print(len(ready_prompt_queue))
     token_queue = ready_prompt_queue[:num_token_machines]
-    #print(token_queue)
     for _ in range(num_token_machines):
         ready_prompt_queue.pop(0)
 
@@ -149,9 +133,6 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
     while (len(token_queue) > 0):
         sleep = True
         for idx,req in enumerate(token_queue):
-            # if req.prompt and token_cur_time[0] < req.start_time:
-            #     continue
-            # else:
                 token_queue.pop(idx)
                 sleep = False
                 break
@@ -159,21 +140,21 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
         if sleep:
             req = token_queue[0]
             token_queue.pop(0)
-        #print('batch: ', req.batch)
 
         time_done = token_time_us
         time_done += req.start_time
 
         max_time = max(max_time, time_done)
 
-        # events.append({
-        #     "pid": num_prompt_machines + req.stage,
-        #     "ts": max(req.start_time, token_cur_time[req.stage]),
-        #     "dur": token_time_us,
-        #     "ph":"X",
-        #     "name": f"t{req.batch},{trace_list[req.batch] - req.tokens}",
-        #     "cname": trace_colors[req.stage]
-        # })
+        if args.do_traces:
+            events.append({
+                "pid": num_prompt_machines + req.stage,
+                "ts": max(req.start_time, token_cur_time[req.stage]),
+                "dur": token_time_us,
+                "ph":"X",
+                "name": f"t{req.batch},{trace_list[req.batch] - req.tokens}",
+                "cname": trace_colors[req.stage]
+            })
 
         token_cur_time[req.stage] = max(req.start_time, token_cur_time[req.stage])
         token_cur_time[req.stage] += token_time_us
@@ -181,10 +162,8 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
         next_stage = (req.stage + 1) % num_token_machines
         new_req = None
 
-        #print(f"next_stage: {next_stage}")
 
         if req.stage < num_token_machines - 1:
-            #if req.tokens < trace_list[req.batch]: #or (req.stage % token_to_prompt_ratio == 0):
                 new_req = BatchInfo(next_stage, req.batch, False, token_cur_time[req.stage], req.tokens)
                 token_queue.append(new_req)
         else:
@@ -195,23 +174,22 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
                 req_end_times[req.batch] = token_cur_time[req.stage]
                 if len(ready_prompt_queue) > 0:
                     new_req = ready_prompt_queue[:1]
-                    #print(new_req[0].start_time/1000000)
                     for r in new_req:
                         token_queue.append(r)
                         ready_prompt_queue.pop(0)
                         next_prompt += 1
 
-    # with open(f'../traces/dv_trace.json', 'w') as f:
-    #     json.dump(events, f)
+    if args.do_traces:
+        with open(f'dv_trace.json', 'w') as f:
+            json.dump(events, f)
 
     dur = [(x-y)/1000000 for x,y in zip(req_end_times, req_start_times)]
 
     req_start_times_sec = [x/1000000 for x in req_start_times]
     req_end_times_sec = [x/1000000 for x in req_end_times]
-    #print(req_start_times_sec, req_end_times_sec, dur)
 
     norm_lat = [x/y for x,y in zip(dur, trace_list)]
-    print("LAT/TOKEN: ", np.median(norm_lat),max(norm_lat), min(norm_lat))
+    print(f"LAT/TOKEN: median: {np.median(norm_lat)}, max: {max(norm_lat)}, min: {min(norm_lat)}")
 
     max_time = max(req_end_times)
     print(f"Total time is {max_time/1e6} sec, thr is {len(trace_list)/(max_time/1e6)} ubatces/sec")
@@ -223,10 +201,5 @@ if __name__ == "__main__":
         trace_list = json.load(f)
 
     trace_list = [min(max(x[1],2),1000) for x in trace_list[:512]]
-    trace_list_new = []
-    # for x in trace_list:
-    #     for i in range(2):
-    #         trace_list_new.append(x)
-    # trace_list = trace_list_new
     print('trace_list: ', len(trace_list), np.average(trace_list))
     simulate_dv(trace_list, args.rps, args.num_prompt_machines,  args.num_token_machines, args.prompt_time, args.token_time, args.cache_time)
