@@ -435,7 +435,6 @@ public:
     void registerCallback(callback_sig* fn, void* ctx);
     void unRegisterCallback();
 
-    void cleanup();
     void reset();
 
     // prompt-token disaggregation

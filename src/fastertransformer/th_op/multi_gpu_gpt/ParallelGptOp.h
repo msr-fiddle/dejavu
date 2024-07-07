@@ -346,6 +346,11 @@ public:
 
     void cleanup() override
     {
+        gpt_ptr->comp_done_ = true;
+#ifdef TEST_FAILURES
+        nccl_monitor_thread_.join();
+        printf("NCCL JOINED\n");
+#endif
         gpt_ptr->reset();
     }
 
@@ -777,7 +782,6 @@ public:
                 gpt_ptr->comp_thread_.join();
                 printf("COMP THREAD JOINED!\n");
             }
-            //nccl_monitor_thread_.join();
             if (gpt_ptr->teptr_ != nullptr) {
                 printf("GOT EXCEPTION!\n");
                 std::exception_ptr exp_ptr = std::move(gpt_ptr->teptr_);

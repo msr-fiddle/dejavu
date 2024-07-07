@@ -526,6 +526,8 @@ def main():
                     print(f"rem is {rem}")
             elif (rem==0 and scheduled==args.num_requests):
                 print(f"Process {rank}, all requests done!")
+                #torch.distributed.barrier()
+                model.cleanup()
                 server.terminate()
                 return
             elif (rem==0 and args.num_requests - scheduled < num_to_schedule):
