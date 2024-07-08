@@ -170,6 +170,7 @@ private:
     std::vector<int>  ubatch_step_restart_;
     std::vector<int>  ubatch_step_end_;
     std::vector<bool> done_;
+    std::vector<bool> ft_done_;
 
     void allocateBuffer() override;
     void allocateBuffer(size_t batch_size,

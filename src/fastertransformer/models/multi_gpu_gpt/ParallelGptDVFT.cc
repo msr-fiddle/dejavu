@@ -244,6 +244,7 @@ void ParallelGptDVFT<T>::allocateBuffer(size_t batch_size,
         if (global_iteration_ == 0) {
             ubatch_phase_.push_back(false);
             done_.push_back(false);
+            ft_done_.push_back(false);
             ubatch_step_.push_back(max_input_len);
             ubatch_step_start_.push_back(max_input_len);
             ubatch_step_restart_.push_back(max_input_len);
@@ -943,6 +944,16 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
         // 1. send prompt
         for (int i = 0; i < num_microbatches; i++) {
 
+            if (ft_done_[i]) {
+                if (pipeline_para_.rank_ % 2 != 0) {
+                    recv_[(i + 1) % pipeline_para_.world_size_] = 1;
+                }
+                else {
+                    recv_[i] = 1;
+                }
+                continue;
+            }
+
             if (pipeline_para_.rank_ % 2 != 0) {
                 while (recv_[i]) {
                     if (thread_done_)
@@ -987,17 +998,25 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
         }
 
         for (int i = 0; i < num_microbatches; i++)
-            done[i] = false;
+            done[i] = ft_done_[i];
 
         while (1) {
-            bool all_done = false;
+            bool all_done = true;
             for (int i = 0; i < num_microbatches; i++) {
 
                 if (thread_done_)
                     return;
 
-                if (done[i])
+                if (done[i]) {
+                    printf("[SENDER] UBATCH %d IGNORE\n", i);
+                    if (pipeline_para_.rank_ % 2 != 0) {
+                        recv_[(i + 1) % pipeline_para_.world_size_] = 1;
+                    }
+                    else {
+                        recv_[i] = 1;
+                    }
                     continue;
+                }
 
                 while (1) {
                     step_mtx_.lock();
@@ -1042,8 +1061,10 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
                 copy_step[i] += 1;  // ubatch_step_[i];
                 if (copy_step[i] == ubatch_step_end_[i]) {
                     done[i]      = true;
-                    all_done     = true;
                     copy_step[i] = max_context_len;
+                }
+                else {
+                    all_done = false;
                 }
             }
             if (all_done)
@@ -1133,6 +1154,12 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                 if (thread_done_)
                     return;
             }
+
+            if (ft_done_[i]) {
+                recv_[i] = false;
+                continue;
+            }
+
             printf("**************** [RECEIVER %d] Get prompt for ubatch %d from %d, size is %d\n",
                    cache_stream_para_.rank_,
                    i,
@@ -1149,23 +1176,28 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
         }
 
         for (int i = 0; i < num_microbatches; i++)
-            done[i] = false;
+            done[i] = ft_done_[i];
 
         // 2. get per token
         while (1) {
-            bool all_done = false;
+            bool all_done = true;
             for (int i = 0; i < num_microbatches; i++) {
 
                 if (thread_done_)
                     return;
 
-                if (done[i])
+                if (done[i]) {
+                    printf("[RECEIVER] UBATCH %d IGNORE\n", i);
+                    recv_[i] = false;
                     continue;
+                }
 
                 while (!recv_[i]) {
                     if (thread_done_)
                         return;
                 }
+
+
                 printf(
                     "========================== [RECEIVER %d] Get token for step %d, ubatch %d from %d, addr is %p, size is %d\n",
                     cache_stream_para_.rank_,
@@ -1177,16 +1209,18 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                 get_token_from_replica((char*)(replica_cache_[i]) + copy_step[i] * replica_token_cache_size_,
                                        replica_token_cache_size_,
                                        peer);
-                recv_[i] = false;
                 controller_mtx_.lock();
                 controller_client_->SendCacheReceived(cache_stream_para_.rank_, ubatch_global_id_[i], copy_step[i]);
                 controller_mtx_.unlock();
 
+                recv_[i] = false;
                 copy_step[i] += 1;
                 if (copy_step[i] == ubatch_step_end_[i]) {
                     done[i]      = true;
-                    all_done     = true;
                     copy_step[i] = max_context_len;
+                }
+                else {
+                    all_done = false;
                 }
             }
             if (all_done)
@@ -2453,6 +2487,7 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
             ubatch_step_restart_[i] = max_input_length;
             uint8_t* ptr            = input_tensors->at("finished").getPtr<uint8_t>();
             done_[i]                = *(ptr + i);
+            ft_done_[i]             = done_[i]; // for replication
         }
         else {
             ubatch_step_restart_[i] = ubatch_step_[i];

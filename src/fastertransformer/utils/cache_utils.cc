@@ -660,7 +660,7 @@ void TCPCacheManager::flush(void* src_address, size_t num_bytes, int dst_rank, v
         ip::tcp::socket*          socket = (*sockets_)[dst_rank];
         boost::system::error_code ec;
 
-        printf("AT TCP FLUSH! SOCKET ADDR IS %p, dst_rank is %d, send %d bytes\n", socket, dst_rank, num_bytes);
+        //printf("AT TCP FLUSH! SOCKET ADDR IS %p, dst_rank is %d, send %d bytes\n", socket, dst_rank, num_bytes);
         size_t bytes_written = write(
             *socket, buffer(src_address, num_bytes), transfer_exactly(num_bytes), ec);  // we need to write num_bytes
         if (ec) {
