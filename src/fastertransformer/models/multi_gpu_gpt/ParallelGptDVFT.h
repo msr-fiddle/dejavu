@@ -205,6 +205,8 @@ private:
     void prompt_receiver();
     void swap_cache_out(size_t step, int local_batch_size, int ubatch_id);
     void swap_cache_in(int ubatch_id, int local_batch_size, int num_microbatches, int prompt_size);
+    void join_thread(std::thread& candidate_thread);
+
 
     void computeContextCumLogProbs(float*                      cum_log_probs,
                                    const T*                    context_decoder_outputs,

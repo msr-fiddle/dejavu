@@ -45,6 +45,16 @@ void ParallelGptDVFT<T>::gpu_sync(cudaStream_t stream)
 #endif
 }
 
+
+template<typename T>
+void ParallelGptDVFT<T>::join_thread(std::thread& candidate_thread)
+{
+    if (candidate_thread.joinable()) {
+        candidate_thread.join();
+    }
+}
+
+
 template<typename T>
 void ParallelGptDVFT<T>::gpu_sync_stream(cudaStream_t stream, ncclComm_t comm)
 {
@@ -640,7 +650,7 @@ ParallelGptDVFT<T>::~ParallelGptDVFT()
 
         int num_microbatches = gpt_context_decoder_->stream_threads_.size();
         for (int i = 0; i < num_microbatches; i++)
-            (gpt_context_decoder_->stream_threads_[i]).join();
+            join_thread(gpt_context_decoder_->stream_threads_[i]);
     }
 
     delete gpt_decoder_;
@@ -679,9 +689,6 @@ ParallelGptDVFT<T>::~ParallelGptDVFT()
     if (prompt_recv_socket_ != nullptr)
         prompt_recv_socket_->close();
     printf("At ParallelGptDVFT destructor, closed rest sockets \n");
-
-    // recv_thread_.join();
-    // stream_thread_.join();
 
     printf("At ParallelGptDVFT destructor, delete cache managers\n");
     if (ds_cache_manager_ != nullptr)
@@ -1323,17 +1330,17 @@ void ParallelGptDVFT<T>::monitor_nccl()
                 thread_done_ = true;
 
                 if (token_only_) {
-                    recv_thread_.join();
-                    stream_thread_.join();
+                    join_thread(recv_thread_);
+                    join_thread(stream_thread_);
                     if (prompt_world_size_ > 0)
-                        prompt_boost_thread_.join();
+                        join_thread(prompt_boost_thread_);
                 }
                 else if (prompt_only_) {
                     gpt_context_decoder_->thread_done_ = true;
 
                     int num_microbatches = gpt_context_decoder_->stream_threads_.size();
                     for (int i = 0; i < num_microbatches; i++)
-                        (gpt_context_decoder_->stream_threads_[i]).join();
+                        join_thread(gpt_context_decoder_->stream_threads_[i]);
                 }
 
                 printf("Stream threads joined!\n");
@@ -3836,7 +3843,7 @@ void ParallelGptDVFT<T>::reset()
 
         int num_microbatches = gpt_context_decoder_->stream_threads_.size();
         for (int i = 0; i < num_microbatches; i++)
-            (gpt_context_decoder_->stream_threads_[i]).join();
+            join_thread(gpt_context_decoder_->stream_threads_[i]);
     }
 
     delete gpt_decoder_;
@@ -3877,10 +3884,10 @@ void ParallelGptDVFT<T>::reset()
     printf("At ParallelGptDVFT destructor, closed rest sockets \n");
 
     if (token_only_) {
-        recv_thread_.join();
-        stream_thread_.join();
+        join_thread(recv_thread_);
+        join_thread(stream_thread_);
         if (prompt_world_size_ > 0)
-            prompt_boost_thread_.join();
+            join_thread(prompt_boost_thread_);
     }
 
 
@@ -3894,7 +3901,7 @@ void ParallelGptDVFT<T>::reset()
     if (dv_server_started_) {
         printf("SHUT DOWN!\n");
         Shutdown(std::ref(dejavu_grpc_service_));
-        dv_thread_.join();
+        join_thread(dv_thread_);
     }
 }
 
