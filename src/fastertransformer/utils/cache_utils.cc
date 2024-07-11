@@ -564,7 +564,7 @@ void NCCLCacheManager::fetch(void* dst_address, size_t num_bytes, int src_rank, 
 void MPICacheManager::flush(void* src_address, size_t num_bytes, int dst_rank, void* dst_address, cudaStream_t stream)
 {
     if (dst_address != NULL) {
-        CUDACHECK(cudaMemcpyAsync(dst_address, src_address, num_bytes, cudaMemcpyDeviceToHost, stream));
+        //CUDACHECK(cudaMemcpyAsync(dst_address, src_address, num_bytes, cudaMemcpyDeviceToHost, stream));
     }
     else {
 

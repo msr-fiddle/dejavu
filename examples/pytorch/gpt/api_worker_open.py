@@ -472,6 +472,14 @@ def main():
     scheduled = 0
     restart = False
 
+    # Sync with peers to get maximum scheduled
+    scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32).cuda()
+    tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+    torch.distributed.all_gather(tensor_list, scheduled_tensor)
+    tensor_list = [x.item() for x in tensor_list]
+    scheduled = max(tensor_list)
+    print(f"Scheduled is {scheduled}")
+
     while True:
         try:
             while True:
@@ -564,6 +572,15 @@ def main():
             gpt_generate_fn(model, ubatch_size, max_context_len,  cur_input_ids, cur_input_lengths, cur_output_lengths, finished, cur_ubatch_ids)
             prep_time = time.time()-start_time
             print(f"[BENCHMARK-{rank}] Warmup took {time.time()-wtime} sec")
+
+            scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32).cuda()
+            tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+            torch.distributed.all_gather(tensor_list, scheduled_tensor)
+            tensor_list = [x.item() for x in tensor_list]
+            scheduled = max(tensor_list)
+
+            print(f"Scheduled is {scheduled}")
+
 
 
 

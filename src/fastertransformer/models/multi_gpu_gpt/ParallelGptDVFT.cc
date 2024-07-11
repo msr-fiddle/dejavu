@@ -655,8 +655,11 @@ ParallelGptDVFT<T>::~ParallelGptDVFT()
 
     delete gpt_decoder_;
     delete gpt_context_decoder_;
+    check_cuda_error(cudaDeviceSynchronize());
     printf("At ParallelGptDVFT destructor, before freeBuffer\n");
     freeBuffer();
+    check_cuda_error(cudaDeviceSynchronize());
+
     printf("At ParallelGptDVFT destructor, free mem\n");
     if (mapped_host_addr_[0] != NULL) {
         CUDACHECK(cudaHostUnregister(mapped_host_addr_[0]));
@@ -900,11 +903,11 @@ void ParallelGptDVFT<T>::copy_token_to_replica(int start_step, int ubatch_id, in
                        (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
     local_cache_manager_->stream_out(task);
 
-    printf("************************ [SENDER %d] Send token for step %d, ubatch id %d, to rank %d\n",
-           cache_stream_para_.rank_,
-           start_step,
-           ubatch_id,
-           peer);
+    // printf("************************ [SENDER %d] Send token for step %d, ubatch id %d, to rank %d\n",
+    //        cache_stream_para_.rank_,
+    //        start_step,
+    //        ubatch_id,
+    //        peer);
 
     local_cache_manager_->flush(mapped_host_addr_[ubatch_id] + start_step * token_cache_size_,
                                 token_cache_size_,
@@ -924,7 +927,7 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
     if (prompt_only_ || pipeline_para_.world_size_ == 1)
         return;
 
-    printf("[TOKEN-SENDER] Starting ....\n");
+    //printf("[TOKEN-SENDER] Starting ....\n");
 
     int peer = prompt_world_size_ + ((pipeline_para_.rank_ + 1) * tensor_para_.world_size_) % token_world_size_
                + tensor_para_.rank_;
@@ -945,7 +948,7 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
                 break;
         }
 
-        printf("**************** [SENDER %d] START\n", cache_stream_para_.rank_);
+        //printf("**************** [SENDER %d] START\n", cache_stream_para_.rank_);
 
 
         // 1. send prompt
@@ -980,12 +983,12 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
 
             if (ubatch_step_restart_[i] == ubatch_step_start_[i]) {
 
-                printf("**************** [SENDER %d] %d, Ubatch %d, Send prompt to %d, size is %d\n",
-                       cache_stream_para_.rank_,
-                       global_iteration_,
-                       i,
-                       peer,
-                       max_context_len * token_cache_size_);
+                // printf("**************** [SENDER %d] %d, Ubatch %d, Send prompt to %d, size is %d\n",
+                //        cache_stream_para_.rank_,
+                //        global_iteration_,
+                //        i,
+                //        peer,
+                //        max_context_len * token_cache_size_);
 
                 local_cache_manager_->flush(
                     mapped_host_addr_[i], max_context_len * token_cache_size_, peer, NULL, flush_key_stream_);
@@ -1015,7 +1018,7 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
                     return;
 
                 if (done[i]) {
-                    printf("[SENDER] UBATCH %d IGNORE\n", i);
+                    //printf("[SENDER] UBATCH %d IGNORE\n", i);
                     if (pipeline_para_.rank_ % 2 != 0) {
                         recv_[(i + 1) % pipeline_para_.world_size_] = 1;
                     }
@@ -1082,7 +1085,7 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
         if (thread_done_)
             return;
 
-        printf("************************ [SENDER %d] OK\n", cache_stream_para_.rank_);
+        //printf("************************ [SENDER %d] OK\n", cache_stream_para_.rank_);
     }
 }
 
@@ -1125,7 +1128,7 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                                             int local_batch_size)
 {
 
-    printf("[TOKEN-RECEIVER] Starting ....\n");
+    //printf("[TOKEN-RECEIVER] Starting ....\n");
 
     MPI_Status status;
     if (prompt_only_ || pipeline_para_.world_size_ == 1)
@@ -1153,7 +1156,7 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                 break;
         }
 
-        printf("**************** [RECEIVER %d] START\n", cache_stream_para_.rank_);
+        //printf("**************** [RECEIVER %d] START\n", cache_stream_para_.rank_);
 
         // 1. get prompt
         for (int i = 0; i < num_microbatches; i++) {
@@ -1167,11 +1170,11 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                 continue;
             }
 
-            printf("**************** [RECEIVER %d] Get prompt for ubatch %d from %d, size is %d\n",
-                   cache_stream_para_.rank_,
-                   i,
-                   peer,
-                   replica_prompt_cache_size);
+            // printf("**************** [RECEIVER %d] Get prompt for ubatch %d from %d, size is %d\n",
+            //        cache_stream_para_.rank_,
+            //        i,
+            //        peer,
+            //        replica_prompt_cache_size);
             if (ubatch_step_restart_[i] == ubatch_step_start_[i]) {
                 get_token_from_replica((char*)(replica_cache_[i]), replica_prompt_cache_size, peer);
                 controller_mtx_.lock();
@@ -1194,7 +1197,7 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                     return;
 
                 if (done[i]) {
-                    printf("[RECEIVER] UBATCH %d IGNORE\n", i);
+                    //printf("[RECEIVER] UBATCH %d IGNORE\n", i);
                     recv_[i] = false;
                     continue;
                 }
@@ -1205,14 +1208,14 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                 }
 
 
-                printf(
-                    "========================== [RECEIVER %d] Get token for step %d, ubatch %d from %d, addr is %p, size is %d\n",
-                    cache_stream_para_.rank_,
-                    copy_step[i],
-                    i,
-                    peer,
-                    replica_cache_[i],
-                    replica_token_cache_size_);
+                // printf(
+                //     "========================== [RECEIVER %d] Get token for step %d, ubatch %d from %d, addr is %p, size is %d\n",
+                //     cache_stream_para_.rank_,
+                //     copy_step[i],
+                //     i,
+                //     peer,
+                //     replica_cache_[i],
+                //     replica_token_cache_size_);
                 get_token_from_replica((char*)(replica_cache_[i]) + copy_step[i] * replica_token_cache_size_,
                                        replica_token_cache_size_,
                                        peer);
@@ -1240,14 +1243,14 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
         if (thread_done_)
             return;
 
-        printf("========================== [RECEIVER %d] OK\n", cache_stream_para_.rank_);
+        //printf("========================== [RECEIVER %d] OK\n", cache_stream_para_.rank_);
     }
 }
 
 template<typename T>
 void ParallelGptDVFT<T>::prompt_receiver()
 {
-    printf("[BOOST] PROMT RECEIVER THREAD!\n");
+    //printf("[BOOST] PROMT RECEIVER THREAD!\n");
 
     while (1) {
 
@@ -1263,7 +1266,7 @@ void ParallelGptDVFT<T>::prompt_receiver()
             printf("BOOST ERROR OCCURED WHILE READING!\n");
             return;
         }
-        printf("------------------ GOT SLOT ID %d\n", slot_id);
+        //printf("------------------ GOT SLOT ID %d\n", slot_id);
 
         // get per_layer
 
@@ -1289,7 +1292,7 @@ void ParallelGptDVFT<T>::prompt_receiver()
                 printf("BOOST ERROR OCCURED WHILE READING!\n");
                 return;
             }
-            printf("Layer %d, got %d bytes, per_layer_prompt_size_ is %d\n", l, num_read, per_layer_prompt_size_);
+            //printf("Layer %d, got %d bytes, per_layer_prompt_size_ is %d\n", l, num_read, per_layer_prompt_size_);
         }
 
         // this is an extra copy, can optimize later
@@ -1345,20 +1348,32 @@ void ParallelGptDVFT<T>::monitor_nccl()
 
                 printf("Stream threads joined!\n");
 
-                cudaStreamDestroy(stream_);
+                cudaStreamSynchronize(fetch_key_stream_);
+                cudaStreamSynchronize(fetch_value_stream_);
+                cudaStreamSynchronize(flush_key_stream_);
+                cudaStreamSynchronize(flush_value_stream_);
+
                 cudaStreamDestroy(fetch_key_stream_);
                 cudaStreamDestroy(fetch_value_stream_);
                 cudaStreamDestroy(flush_key_stream_);
                 cudaStreamDestroy(flush_value_stream_);
 
                 printf("CUDA Streams destroyed\n");
+                usleep(1000000);
 
                 ncclCommAbort(pipeline_para_.nccl_comm_);
+                printf("Abort 1!\n");
+                usleep(1000000);
+
                 if (tensor_para_.nccl_comm_ != nullptr)
                     ncclCommAbort(tensor_para_.nccl_comm_);
-                ncclCommAbort(cache_stream_para_.nccl_comm_);
+                printf("Abort 2!\n");
+                usleep(1000000);
 
-                printf("Comm destroyed!\n");
+                ncclCommAbort(cache_stream_para_.nccl_comm_);
+                cudaStreamDestroy(stream_);
+                printf("All Comm destroyed!\n");
+                usleep(1000000);
 
                 throw std::runtime_error("NCCL ERROR - ABORT!");
             }
@@ -1376,7 +1391,7 @@ template<typename T>
 void ParallelGptDVFT<T>::exchangeCaches(int start_step, int num_microbatches, int local_batch_size, int prompt_size)
 {
 
-    printf("Inside exchangeCaches\n");
+    //printf("Inside exchangeCaches\n");
 
     std::vector<int> layers(layers_per_pp_);
     for (int l = 0; l < layers_per_pp_; l++)
@@ -3861,6 +3876,13 @@ void ParallelGptDVFT<T>::reset()
     if (prompt_boost_address_ != NULL)
         free(prompt_boost_address_);
 
+    if (token_only_) {
+        join_thread(recv_thread_);
+        join_thread(stream_thread_);
+        if (prompt_world_size_ > 0)
+            join_thread(prompt_boost_thread_);
+    }
+
     printf("At ParallelGptDVFT destructor, close sockets (if any)\n");
     if (recv_socket_ != nullptr)
         recv_socket_->close();
@@ -3882,13 +3904,6 @@ void ParallelGptDVFT<T>::reset()
     if (prompt_recv_socket_ != nullptr)
         prompt_recv_socket_->close();
     printf("At ParallelGptDVFT destructor, closed rest sockets \n");
-
-    if (token_only_) {
-        join_thread(recv_thread_);
-        join_thread(stream_thread_);
-        if (prompt_world_size_ > 0)
-            join_thread(prompt_boost_thread_);
-    }
 
 
     printf("At ParallelGptDVFT destructor, delete cache managers\n");
