@@ -246,10 +246,8 @@ public:
                 }
                 else {
 #if defined(CUDA_MEMORY_POOL_DISABLED)
-                    printf("HERE 2!\n");
                     check_cuda_error(cudaFree(*ptr));
 #else
-                    printf("HERE 1!\n");
                     check_cuda_error(cudaFreeAsync(*ptr, stream_));
                     cudaStreamSynchronize(stream_);
 #endif

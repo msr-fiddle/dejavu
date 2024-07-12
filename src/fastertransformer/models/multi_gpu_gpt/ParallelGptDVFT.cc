@@ -39,7 +39,7 @@ template<typename T>
 void ParallelGptDVFT<T>::gpu_sync(cudaStream_t stream)
 {
 #ifdef STREAM_SYNC
-    cudaStreamSynchronize(stream);
+    CUDACHECK(cudaStreamSynchronize(stream));
 #else
     sync_check_cuda_error();
 #endif
@@ -58,32 +58,7 @@ void ParallelGptDVFT<T>::join_thread(std::thread& candidate_thread)
 template<typename T>
 void ParallelGptDVFT<T>::gpu_sync_stream(cudaStream_t stream, ncclComm_t comm)
 {
-    cudaError_t  cudaErr;
-    ncclResult_t ncclErr, ncclAsyncErr;
-    // printf("INSIDE gpu_sync_stream\n");
     CUDACHECK(cudaStreamSynchronize(stream));
-    // while (1) {
-    //     cudaErr = cudaStreamQuery(stream);
-    //     if (cudaErr == cudaSuccess)
-    //         return;
-
-    //     ncclErr = ncclCommGetAsyncError(comm, &ncclAsyncErr);
-    //     if (ncclErr != ncclSuccess) {
-    //         printf("NCCL Error : ncclCommGetAsyncError returned %d\n", ncclErr);
-    //         throw std::runtime_error("NCCL FAILURE - THROW ERROR!");
-    //     }
-
-    //     if (ncclAsyncErr != ncclSuccess || reset_) {
-    //         // An asynchronous error happened. Stop the operation and destroy
-    //         // the communicator
-    //         ncclErr = ncclCommAbort(comm);
-    //         if (ncclErr != ncclSuccess)
-    //             printf("NCCL Error : ncclCommDestroy returned %d\n", ncclErr);
-    //         // Caller may abort or try to re-create a new communicator.
-    //         throw std::runtime_error("CUDA FAILURE - THROW ERROR!");
-    //     }
-    // }
-    // printf("EXIT gpu_sync_stream\n");
 }
 
 template<typename T>
@@ -655,10 +630,8 @@ ParallelGptDVFT<T>::~ParallelGptDVFT()
 
     delete gpt_decoder_;
     delete gpt_context_decoder_;
-    check_cuda_error(cudaDeviceSynchronize());
     printf("At ParallelGptDVFT destructor, before freeBuffer\n");
     freeBuffer();
-    check_cuda_error(cudaDeviceSynchronize());
 
     printf("At ParallelGptDVFT destructor, free mem\n");
     if (mapped_host_addr_[0] != NULL) {
@@ -699,6 +672,7 @@ ParallelGptDVFT<T>::~ParallelGptDVFT()
     if (local_cache_manager_ != nullptr)
         delete local_cache_manager_;
     printf("EXIT ParallelGptDVFT destructor\n");
+
 }
 
 template<typename T>
@@ -792,7 +766,7 @@ void ParallelGptDVFT<T>::computeContextCumLogProbs(float*                      c
                             tensor_para_.rank_,
                             tensor_para_,
                             stream_);
-            check_cuda_error(cudaStreamSynchronize(stream_));
+            CUDACHECK(cudaStreamSynchronize(stream_));
             gpu_sync_stream(stream_, pipeline_para_.nccl_comm_);
 
             invokeTransposeAxis01(lp_logits_buf_[ite],
@@ -1359,21 +1333,20 @@ void ParallelGptDVFT<T>::monitor_nccl()
                 cudaStreamDestroy(flush_value_stream_);
 
                 printf("CUDA Streams destroyed\n");
-                usleep(1000000);
 
                 ncclCommAbort(pipeline_para_.nccl_comm_);
                 printf("Abort 1!\n");
-                usleep(1000000);
 
                 if (tensor_para_.nccl_comm_ != nullptr)
                     ncclCommAbort(tensor_para_.nccl_comm_);
                 printf("Abort 2!\n");
-                usleep(1000000);
 
                 ncclCommAbort(cache_stream_para_.nccl_comm_);
                 cudaStreamDestroy(stream_);
                 printf("All Comm destroyed!\n");
-                usleep(1000000);
+
+                //CUDACHECK(cudaDeviceSynchronize());
+                //CUDACHECK(cudaGetLastError());
 
                 throw std::runtime_error("NCCL ERROR - ABORT!");
             }
@@ -1679,12 +1652,12 @@ void ParallelGptDVFT<T>::swap_cache_in(int ubatch_id, int local_batch_size, int 
             mapped_host_addr_[idx_to_fetch] + total_cache_size_};
     swapping_cache_manager_->stream_in(task);
 
-    cudaEventRecord(*key_swapping_events_[idx_to_fetch], fetch_key_stream_);
-    cudaEventRecord(*value_swapping_events_[idx_to_fetch], fetch_value_stream_);
+    CUDACHECK(cudaEventRecord(*key_swapping_events_[idx_to_fetch], fetch_key_stream_));
+    CUDACHECK(cudaEventRecord(*value_swapping_events_[idx_to_fetch], fetch_value_stream_));
 
     if (num_slots_ == 1) {
-        cudaStreamSynchronize(fetch_key_stream_);
-        cudaStreamSynchronize(fetch_value_stream_);
+        CUDACHECK(cudaStreamSynchronize(fetch_key_stream_));
+        CUDACHECK(cudaStreamSynchronize(fetch_value_stream_));
     }
 
     auto                         endm    = high_resolution_clock::now();
@@ -2136,11 +2109,11 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 
         if (mapped_host_addr_[0] == NULL) {
 
-            cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking));
 
-            cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking));
 
             mapped_host_addr_[0] = malloc(num_microbatches * prompt_buffer_size_ * 2 * total_cache_size_);
             CUDACHECK(cudaHostRegister(mapped_host_addr_[0],
@@ -2207,11 +2180,11 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 
         if (recv_host_addr_[0] == NULL) {
 
-            cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking));
 
-            cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking));
 
             // for each microbatch
             // TODO: what exactly to allocate here?
@@ -2566,14 +2539,14 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
         if (ubatch_phase_[i])
             continue;
 
-        cudaMemsetAsync(output_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_);
-        cudaMemsetAsync(parent_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_);
-        cudaMemsetAsync(
-            tiled_masked_tokens_[i], false, sizeof(bool) * local_batch_size * beam_width * memory_len_, stream_);
-        cudaMemsetAsync(tiled_total_padding_count_[i], 0, sizeof(int) * local_batch_size * beam_width, stream_);
+        CUDACHECK(cudaMemsetAsync(output_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_));
+        CUDACHECK(cudaMemsetAsync(parent_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_));
+        CUDACHECK(cudaMemsetAsync(
+            tiled_masked_tokens_[i], false, sizeof(bool) * local_batch_size * beam_width * memory_len_, stream_));
+        CUDACHECK(cudaMemsetAsync(tiled_total_padding_count_[i], 0, sizeof(int) * local_batch_size * beam_width, stream_));
         if (beam_width > 1) {
-            cudaMemsetAsync(
-                cache_indirections_[0], 0, 2 * sizeof(int) * local_batch_size * beam_width * memory_len_, stream_);
+            CUDACHECK(cudaMemsetAsync(
+                cache_indirections_[0], 0, 2 * sizeof(int) * local_batch_size * beam_width * memory_len_, stream_));
         }
     }
 
@@ -3028,10 +3001,6 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
     std::vector<int> layers(layers_per_pp_);
     for (int l = 0; l < layers_per_pp_; l++)
         layers[l] = l;
-
-    // for testing
-    // CUDACHECK(cudaDeviceSynchronize());
-    // return;
 
     std::vector<int> finished_pp_ids;
     if (prompt_only_) {
@@ -3863,9 +3832,11 @@ void ParallelGptDVFT<T>::reset()
 
     delete gpt_decoder_;
     delete gpt_context_decoder_;
+
     printf("At ParallelGptDVFT destructor, before freeBuffer\n");
     freeBuffer();
     printf("At ParallelGptDVFT destructor, free mem\n");
+
     if (mapped_host_addr_[0] != NULL) {
         CUDACHECK(cudaHostUnregister(mapped_host_addr_[0]));
         free(mapped_host_addr_[0]);
@@ -3905,7 +3876,6 @@ void ParallelGptDVFT<T>::reset()
         prompt_recv_socket_->close();
     printf("At ParallelGptDVFT destructor, closed rest sockets \n");
 
-
     printf("At ParallelGptDVFT destructor, delete cache managers\n");
     if (ds_cache_manager_ != nullptr)
         delete ds_cache_manager_;
@@ -3918,6 +3888,7 @@ void ParallelGptDVFT<T>::reset()
         Shutdown(std::ref(dejavu_grpc_service_));
         join_thread(dv_thread_);
     }
+
 }
 
 template class ParallelGptDVFT<float>;
