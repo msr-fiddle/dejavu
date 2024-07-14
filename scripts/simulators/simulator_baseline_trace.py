@@ -66,7 +66,7 @@ def generate_timestamps(size, rps, num_peers):
     return req_start_times
 
 
-def simulate(trace_list, rps, num_machines, prompt_time, token_time):
+def simulate(trace_list, rps, num_machines, prompt_time, token_time, do_traces=False):
 
     prompt_time_us = prompt_time * 1000
     token_time_us = token_time * 1000
@@ -85,7 +85,7 @@ def simulate(trace_list, rps, num_machines, prompt_time, token_time):
     max_time = 0
     early_stops = 0
 
-    if args.do_traces:
+    if do_traces:
         events = []
         for i in range(args.num_machines):
             event_i = {
@@ -114,7 +114,7 @@ def simulate(trace_list, rps, num_machines, prompt_time, token_time):
 
         max_time = max(max_time, time_done)
 
-        if args.do_traces:
+        if do_traces:
             #add at trace
             events.append({
                 "pid": req.stage,
@@ -158,7 +158,7 @@ def simulate(trace_list, rps, num_machines, prompt_time, token_time):
         if new_req is not None:
             active_queue.append(new_req)
 
-    if args.do_traces:
+    if do_traces:
         with open(f'baseline_trace.json', 'w') as f:
             json.dump(events, f)
 
@@ -184,4 +184,4 @@ if __name__ == "__main__":
 
     trace_list = [min(max(x[1],2),1000) for x in trace_list[:512]]
     print(len(trace_list), np.average(trace_list))
-    simulate(trace_list, args.rps, args.num_machines, args.prompt_time, args.token_time)
+    simulate(trace_list, args.rps, args.num_machines, args.prompt_time, args.token_time, args.do_traces)

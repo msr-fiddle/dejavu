@@ -24,3 +24,44 @@ python simulator_dv.py --rps r --num_prompt_machines A --num_token_machines B --
 
 The file *filename* is a JSON file, containing a list of [*prompt_size*, *num_generated_tokens*].
 You can add the *--do_traces* option in the above commands, to generation execution traces. JSON files are generated, which you can open with [Chromium](https://www.chromium.org/developers/how-tos/trace-event-profiling-tool/)).
+
+# Reproduce simulations from Appendix B
+
+The following instructions reproduce the DéjàVu Planner simulations from Appendix B.
+We are at [dejavu/scripts/simulators](https://github.com/msr-fiddle/dejavu/tree/master/scripts/simulators)/
+
+## Figure 17 (OPT-66B on 4-A100-80GB machines)
+
+```bash
+
+python simulate_all.py --trace_file ../../datasets/lmsys_tokens.json  --config_file model_info.json --model OPT-66B --mem_per_machine 320 --machine_cost 18.52 --output_csv opt66_4a100.csv
+
+python plot_simulations.py --model OPT-66B --suffix 4a100  --input opt66_4a100.csv
+
+python plot_simulations.py --model OPT-66B --suffix 4a100  --input opt66_4a100.csv --plot_cost --machine_cost 18.52
+
+```
+
+## Figure 18 (OPT-30B on 4-V100-16GB machines)
+
+```bash
+
+python simulate_all.py --trace_file ../../datasets/lmsys_tokens.json  --config_file model_info.json --model OPT-30B --mem_per_machine 64 --machine_cost 8 --output_csv opt30_4v100.csv
+
+python plot_simulations.py --model OPT-30B --suffix 4v100  --input opt30_4v100.csv
+
+python plot_simulations.py --model OPT-30B --suffix 4v100  --input opt30_4v100.csv --plot_cost --machine_cost 8
+
+```
+
+## Figure 19 (BLOOM-176B on 4-A100-80GB machines)
+
+```bash
+
+python simulate_all.py --trace_file ../../datasets/lmsys_tokens.json  --config_file model_info.json --model BLOOM-176B --mem_per_machine 320 --machine_cost 18.52 --output_csv bloom_4a100.csv
+
+python plot_simulations.py --model BLOOM-176B --suffix 4a100  --input bloom_4a100.csv
+
+python plot_simulations.py --model BLOOM-176B --suffix 4a100  --input bloom_4a100.csv --plot_cost --machine_cost 18.52
+
+```

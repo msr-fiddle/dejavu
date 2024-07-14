@@ -68,7 +68,7 @@ def generate_timestamps(size, rps, num_peers):
         start_time += sleep_times[i]
     return req_start_times
 
-def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt_time, token_time, cache_time):
+def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt_time, token_time, cache_time, do_traces=False):
     events = []
 
     prompt_time_us = prompt_time * 1000
@@ -83,7 +83,7 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
     req_end_times = [0]*len(trace_list)
 
     max_time = 0
-    if args.do_traces:
+    if do_traces:
         for i in range(args.num_prompt_machines):
             event_i = {
                 "name": "process_name",
@@ -110,7 +110,7 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
     # 1. prompt processing
     for j in range(len(trace_list)):
         for i in range(num_prompt_machines):
-            if args.do_traces:
+            if do_traces:
                 events.append({
                     "pid": i,
                     "ts": max(req_start_times[j],stime_stage1)+i*(prompt_time_us+cache_time_us),
@@ -146,7 +146,7 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
 
         max_time = max(max_time, time_done)
 
-        if args.do_traces:
+        if do_traces:
             events.append({
                 "pid": num_prompt_machines + req.stage,
                 "ts": max(req.start_time, token_cur_time[req.stage]),
@@ -179,7 +179,7 @@ def simulate_dv(trace_list, rps, num_prompt_machines, num_token_machines, prompt
                         ready_prompt_queue.pop(0)
                         next_prompt += 1
 
-    if args.do_traces:
+    if do_traces:
         with open(f'dv_trace.json', 'w') as f:
             json.dump(events, f)
 
@@ -202,4 +202,4 @@ if __name__ == "__main__":
 
     trace_list = [min(max(x[1],2),1000) for x in trace_list[:512]]
     print('trace_list: ', len(trace_list), np.average(trace_list))
-    simulate_dv(trace_list, args.rps, args.num_prompt_machines,  args.num_token_machines, args.prompt_time, args.token_time, args.cache_time)
+    simulate_dv(trace_list, args.rps, args.num_prompt_machines,  args.num_token_machines, args.prompt_time, args.token_time, args.cache_time, args.do_traces)
