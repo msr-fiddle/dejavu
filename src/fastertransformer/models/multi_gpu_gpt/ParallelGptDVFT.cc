@@ -66,10 +66,19 @@ void ParallelGptDVFT<T>::initialize()
 {
 
     CUDACHECK(cudaGetDeviceCount(&num_devices_));
-
-    for (int i = 0; i < pipeline_para_.world_size_; i++)
-        mapped_host_addr_.push_back(nullptr);
     bool is_prompt = cache_stream_para_.world_size_ > 1 && cache_stream_para_.rank_ < prompt_world_size_;
+
+    if (mapped_host_addr_.empty()) {
+        for (int i = 0; i < pipeline_para_.world_size_; i++)
+            mapped_host_addr_.push_back(nullptr);
+    }
+    else {
+        if (is_prompt) {
+            for (int i = 0; i < pipeline_para_.world_size_; i++)
+                mapped_host_addr_[i] = nullptr;
+        }
+
+    }
 
     gpt_context_decoder_ = new ParallelGptContextDecoder<T>(0,
                                                             0,
@@ -150,6 +159,8 @@ template<typename T>
 void ParallelGptDVFT<T>::initializeVectors(const size_t num_microbatches)
 {
 
+    bool allocate_replica_cache = replica_cache_.empty();
+
     for (size_t i = 0; i < num_microbatches; i++) {
         tiled_total_padding_count_.push_back(nullptr);
         tiled_input_attention_mask_.push_back(nullptr);
@@ -200,7 +211,9 @@ void ParallelGptDVFT<T>::initializeVectors(const size_t num_microbatches)
 
         dynamic_decode_layer_.push_back(nullptr);
         recv_host_addr_.push_back(nullptr);
-        replica_cache_.push_back(nullptr);
+
+        if (allocate_replica_cache)
+            replica_cache_.push_back(nullptr);
 
         key_swapping_events_.push_back(nullptr);
         value_swapping_events_.push_back(nullptr);
@@ -258,6 +271,9 @@ void ParallelGptDVFT<T>::allocateBuffer(size_t batch_size,
     if (gpt_variant_params_.use_attention_linear_bias) {
         linear_bias_slopes_ = (T*)(allocator_->reMalloc(linear_bias_slopes_, sizeof(T) * head_num_, false));
     }
+
+    const size_t replica_cache_size =
+            peer_layers_per_pp_ * batchxbeam * memory_len * hidden_units_ / tensor_para_.world_size_;
 
     // 2. setup
     for (int i = 0; i < num_microbatches; i++) {
@@ -360,9 +376,9 @@ void ParallelGptDVFT<T>::allocateBuffer(size_t batch_size,
             (int*)allocator_->reMalloc(tiled_total_padding_count_[i], batchxbeam * sizeof(int), false);
 
         // at CPU
-        const size_t replica_cache_size =
-            peer_layers_per_pp_ * batchxbeam * memory_len * hidden_units_ / tensor_para_.world_size_;
-        replica_cache_[i] = (char*)calloc(2 * replica_cache_size, sizeof(T));
+        if (replica_cache_[i] == nullptr) {
+            replica_cache_[i] = (char*)calloc(2 * replica_cache_size, sizeof(T));
+        }
 
         dynamic_decode_layer_[i] = new DynamicDecodeLayer<float>(vocab_size_,
                                                                  vocab_size_padded_,
@@ -468,7 +484,6 @@ void ParallelGptDVFT<T>::freeBuffer()
                 allocator_->free((void**)(&compact_size_[i]));
             }
             allocator_->free((void**)(&tiled_total_padding_count_[i]));
-            free(replica_cache_[i]);
 
             CUDACHECK(cudaEventDestroy(*(key_swapping_events_[i])));
             free(key_swapping_events_[i]);
@@ -634,7 +649,7 @@ ParallelGptDVFT<T>::~ParallelGptDVFT()
     freeBuffer();
 
     printf("At ParallelGptDVFT destructor, free mem\n");
-    if (mapped_host_addr_[0] != NULL) {
+    if (prompt_only_ && mapped_host_addr_[0] != NULL) {
         CUDACHECK(cudaHostUnregister(mapped_host_addr_[0]));
         free(mapped_host_addr_[0]);
     }
@@ -1326,6 +1341,7 @@ void ParallelGptDVFT<T>::monitor_nccl()
                 cudaStreamSynchronize(fetch_value_stream_);
                 cudaStreamSynchronize(flush_key_stream_);
                 cudaStreamSynchronize(flush_value_stream_);
+                cudaStreamDestroy(stream_);
 
                 cudaStreamDestroy(fetch_key_stream_);
                 cudaStreamDestroy(fetch_value_stream_);
@@ -1335,14 +1351,11 @@ void ParallelGptDVFT<T>::monitor_nccl()
                 printf("CUDA Streams destroyed\n");
 
                 ncclCommAbort(pipeline_para_.nccl_comm_);
-                printf("Abort 1!\n");
 
                 if (tensor_para_.nccl_comm_ != nullptr)
                     ncclCommAbort(tensor_para_.nccl_comm_);
-                printf("Abort 2!\n");
 
                 ncclCommAbort(cache_stream_para_.nccl_comm_);
-                cudaStreamDestroy(stream_);
                 printf("All Comm destroyed!\n");
 
                 //CUDACHECK(cudaDeviceSynchronize());
@@ -2248,11 +2261,13 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 #endif
 
             // for CPU-CPU copies to replica
-            mapped_host_addr_[0] = calloc(2 * num_microbatches * total_cache_size_, 1);
-            CUDACHECK(cudaHostRegister(
-                mapped_host_addr_[0], 2 * num_microbatches * total_cache_size_, cudaHostRegisterDefault));
-            for (int i = 1; i < num_microbatches; i++) {
-                mapped_host_addr_[i] = (char*)(mapped_host_addr_[0]) + i * 2 * total_cache_size_;
+            if (mapped_host_addr_[0] == NULL) {
+                mapped_host_addr_[0] = calloc(2 * num_microbatches * total_cache_size_, 1);
+                CUDACHECK(cudaHostRegister(
+                    mapped_host_addr_[0], 2 * num_microbatches * total_cache_size_, cudaHostRegisterDefault));
+                for (int i = 1; i < num_microbatches; i++) {
+                    mapped_host_addr_[i] = (char*)(mapped_host_addr_[0]) + i * 2 * total_cache_size_;
+                }
             }
 
 #ifdef WITH_BOOST
@@ -3837,10 +3852,6 @@ void ParallelGptDVFT<T>::reset()
     freeBuffer();
     printf("At ParallelGptDVFT destructor, free mem\n");
 
-    if (mapped_host_addr_[0] != NULL) {
-        CUDACHECK(cudaHostUnregister(mapped_host_addr_[0]));
-        free(mapped_host_addr_[0]);
-    }
     if (recv_host_addr_[0] != NULL)
         free(recv_host_addr_[0]);
 

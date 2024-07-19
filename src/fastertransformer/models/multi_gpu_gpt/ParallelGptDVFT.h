@@ -57,6 +57,9 @@ namespace fastertransformer {
 
 void handle_signal(int signal);
 
+static std::vector<void*> replica_cache_;
+static std::vector<void*> mapped_host_addr_;
+
 template<typename T>
 class ParallelGptDVFT: public BaseLayer {
 private:
@@ -81,9 +84,7 @@ private:
 
     std::mutex              mtx_;
     std::condition_variable cv_;
-    std::vector<void*>      mapped_host_addr_;
     std::vector<void*>      recv_host_addr_;
-    std::vector<void*>      replica_cache_;
     int                     prompt_world_size_;
     int                     token_world_size_;
     int                     prompt_pipeline_size_;

@@ -492,6 +492,7 @@ def main():
                     input_list.pop(0)
 
             j = 0
+            scheduled_this_batch = 0
             for i in range(num_to_schedule):
                 if finished[i]:
                     cur_input_ids[i] = reqs[j]["input_ids"]
@@ -499,7 +500,7 @@ def main():
                     cur_output_lengths[i] = reqs[j]["output_lengths"]
                     cur_ubatch_ids[i] = reqs[j]["ubatch_id"]
                     j += 1
-                    scheduled += 1
+                    scheduled_this_batch += 1
                     finished[i] = 0
 
             # finished = torch.tensor([0]*pipeline_para_size, dtype=torch.uint8)
@@ -507,6 +508,7 @@ def main():
             # cur_input_lengths = [[max_context_len]*ubatch_size]*pipeline_para_size
             # cur_output_lengths = [[200]*ubatch_size]*pipeline_para_size
 
+            scheduled += scheduled_this_batch
             print(f"TIMESTAMP {time.time()}, Process {rank} about to schedule! cur_ubatch_ids is {cur_ubatch_ids}, finished is {finished}")
 
             failure = gpt_generate_fn(model, ubatch_size, max_context_len,  cur_input_ids, cur_input_lengths, cur_output_lengths, finished, cur_ubatch_ids)
