@@ -6,7 +6,7 @@ We support two ways to compile and run DéjàVu:
 | MPI | Disaggregation, Microbatch swapping
 | Boost | Disaggregation, Fault Tolerance, Microbatch swapping
 
-The DéjàVu consists of a controller and multiple workers, as shown in the following figure
+DéjàVu consists of a controller and multiple workers, as shown in the following figure
 
 TODO: add figure
 
@@ -77,8 +77,9 @@ mpirun -n N -x DEJAVU_CONTROLLER_IP=<CONTROLLER_IP> python ../examples/pytorch/g
 
 ### Enable microbatch swapping
 
-You can enable swapping by adding the '--swapping' flag in the mpirun commands above
+You can enable swapping by just adding the '--swapping' flag in the mpirun commands above (it can be enabled both with and without disaggregation). For the examples in Figure 9 of the paper we run DejaVu without disaggregation. Without microbatch swapping we serve *N* requests, with microbatch *b*. With microbatch swapping, we serve *N/2* requests with microbatch *2b* of homogeneous requests (i.e. all requests have fixed prompt size and generate the same number of tokens).
 
+Note that microbatch swapping is not always beneficial for performance (due to large KV cache transfer overheads over PCIe), as detailed in Appendix G of the paper.
 
 ## Compiling without MPI
 

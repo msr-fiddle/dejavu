@@ -293,6 +293,7 @@ protected:
 
 public:
     ControllerClient* controller_client_ = NULL;
+    std::atomic_bool comp_done_;
 
     ParallelGptDVBaseline(size_t               max_batch_size,
                           size_t               max_seq_len,

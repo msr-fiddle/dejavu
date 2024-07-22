@@ -174,7 +174,7 @@ def main():
 
     total_start = time.time()
 
-    num_batches = int(num_requests/num_pp_peers)
+    num_batches = ceil(num_requests/num_pp_peers)
     to_schedule = num_batches
     done = 0
 
@@ -184,7 +184,9 @@ def main():
             for i in range(done,num_batches):
                 print(f"Batch {i}, sleep for {sleep_times[i]}")
                 time.sleep(sleep_times[i])
-                for j in range(num_pp_peers):
+                num_ubatches = min(num_pp_peers, num_requests-i*num_pp_peers)
+                print(f"Num ubatches is {num_ubatches}")
+                for j in range(num_ubatches):
                     idx = i*num_pp_peers + j
                     cur_input_ids = input_ids[idx]
                     cur_input_lengths = input_lengths[idx]

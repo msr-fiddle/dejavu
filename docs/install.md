@@ -141,7 +141,7 @@ wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt -P ../m
 
 ### Run a simple example
 
-Download and convert the model as needed, following the instructions [here](https://github.com/msr-fiddle/dejavu/blob/master/docs/original_ft/gpt_guide.md#download-huggingface-gpt-model-and-convert).
+Download and convert the model as needed, following the instructions [here](https://github.com/msr-fiddle/dejavu/blob/master/docs/original_ft/gpt_guide.md#download-huggingface-gpt-model-and-convert). Note that for fp16 support you need to add the `` and `` flags when calling the *huggingface_gpt_convert.py* script. Make sure to call the *huggingface_opt_convert.py* and *huggingface_bloom_convert.py* scripts for the OPT and BLOOM models respectively.
 
 We assume we are at the path 'dejavu/build'. The following command will run a single-GPU example:
 

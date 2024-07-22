@@ -473,8 +473,13 @@ def main():
     restart = False
 
     # Sync with peers to get maximum scheduled
-    scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32).cuda()
-    tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+    scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32)
+    if args.backend == "nccl":
+        scheduled_tensor = scheduled_tensor.cuda()
+    if args.backend == "nccl":
+        tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+    else:
+        tensor_list = [torch.zeros(1, dtype=torch.int32) for _ in range(world_size)]
     torch.distributed.all_gather(tensor_list, scheduled_tensor)
     tensor_list = [x.item() for x in tensor_list]
     scheduled = max(tensor_list)
@@ -524,7 +529,7 @@ def main():
                 else:
                     rem += 1
 
-            print(f"TIMESTAMP {time.time()}, Process {rank} Done, Scheduled is {scheduled}, num_to_schedule is {num_to_schedule}")
+            print(f"TIMESTAMP {time.time()}, Process {rank} Done, Scheduled is {scheduled}, num_to_schedule is {num_to_schedule}, rem is {rem}")
             if (rem > 0 and scheduled==args.num_requests):
                 print(f"Process {rank}, Final set of requests")
                 while (rem > 0):
@@ -575,8 +580,13 @@ def main():
             prep_time = time.time()-start_time
             print(f"[BENCHMARK-{rank}] Warmup took {time.time()-wtime} sec")
 
-            scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32).cuda()
-            tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+            scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32)
+            if args.backend == "nccl":
+                scheduled_tensor = scheduled_tensor.cuda()
+            if args.backend == "nccl":
+                tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+            else:
+                tensor_list = [torch.zeros(1, dtype=torch.int32) for _ in range(world_size)]
             torch.distributed.all_gather(tensor_list, scheduled_tensor)
             tensor_list = [x.item() for x in tensor_list]
             scheduled = max(tensor_list)
