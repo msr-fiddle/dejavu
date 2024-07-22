@@ -136,3 +136,5 @@ python3.8 ../examples/pytorch/gpt/api_worker_open.py  --tensor_para_size=Y --pro
 
 ```
 changing the variables accordingly, and add the '--restart' and '--failures *F*' option, if this is the *F* inference restart.
+
+For our experiments in Figures 10 and 11, we used background processes (replicas) for DéjàVu. For example, to test inference with 3 failures, you can start 3 background (replica) processes as shown above setting *F=1,2,3* when invoking each of the processes.
