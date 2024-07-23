@@ -2451,6 +2451,16 @@ size_t ParallelGptDVBaseline<T>::getStep()
     return step_;
 }
 
+template<typename T>
+void ParallelGptDVBaseline<T>::reset() {
+    printf("Inside ParallelGptDVBaseline reset\n");
+
+    delete gpt_decoder_;
+    delete gpt_context_decoder_;
+    freeBuffer();
+
+}
+
 template class ParallelGptDVBaseline<float>;
 template class ParallelGptDVBaseline<half>;
 #ifdef ENABLE_BF16

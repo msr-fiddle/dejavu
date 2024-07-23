@@ -472,6 +472,19 @@ def main():
     scheduled = 0
     restart = False
 
+    # Sync with peers to get maximum scheduled
+    scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32)
+    if args.backend == "nccl":
+        scheduled_tensor = scheduled_tensor.cuda()
+    if args.backend == "nccl":
+        tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+    else:
+        tensor_list = [torch.zeros(1, dtype=torch.int32) for _ in range(world_size)]
+    torch.distributed.all_gather(tensor_list, scheduled_tensor)
+    tensor_list = [x.item() for x in tensor_list]
+    scheduled = max(tensor_list)
+    print(f"Scheduled is {scheduled}")
+
     while True:
         try:
             while True:
@@ -484,23 +497,25 @@ def main():
                     input_list.pop(0)
 
             j = 0
-            for i in range(pipeline_para_size):
+            scheduled_this_batch = 0
+            for i in range(num_to_schedule):
                 if finished[i]:
                     cur_input_ids[i] = reqs[j]["input_ids"]
                     cur_input_lengths[i] = reqs[j]["input_lengths"]
                     cur_output_lengths[i] = reqs[j]["output_lengths"]
                     cur_ubatch_ids[i] = reqs[j]["ubatch_id"]
                     j += 1
-                    scheduled += 1
+                    scheduled_this_batch += 1
+                    finished[i] = 0
 
             # finished = torch.tensor([0]*pipeline_para_size, dtype=torch.uint8)
             # cur_input_ids = [[1]*max_context_len*ubatch_size]*pipeline_para_size
             # cur_input_lengths = [[max_context_len]*ubatch_size]*pipeline_para_size
             # cur_output_lengths = [[200]*ubatch_size]*pipeline_para_size
 
-            print(f"TIMESTAMP {time.time()}, Process {rank} about to schedule! cur_ubatch_ids is {cur_ubatch_ids}")
+            scheduled += scheduled_this_batch
+            print(f"TIMESTAMP {time.time()}, Process {rank} about to schedule! cur_ubatch_ids is {cur_ubatch_ids}, finished is {finished}")
 
-            finished = torch.tensor([0]*pipeline_para_size, dtype=torch.uint8)
             failure = gpt_generate_fn(model, ubatch_size, max_context_len,  cur_input_ids, cur_input_lengths, cur_output_lengths, finished, cur_ubatch_ids)
             if failure[0] == 1:
                 print(f"Failure is {failure[0]}")
@@ -514,7 +529,7 @@ def main():
                 else:
                     rem += 1
 
-            print(f"TIMESTAMP {time.time()}, Process {rank} Done, Scheduled is {scheduled}, num_to_schedule is {num_to_schedule}")
+            print(f"TIMESTAMP {time.time()}, Process {rank} Done, Scheduled is {scheduled}, num_to_schedule is {num_to_schedule}, rem is {rem}")
             if (rem > 0 and scheduled==args.num_requests):
                 print(f"Process {rank}, Final set of requests")
                 while (rem > 0):
@@ -523,6 +538,15 @@ def main():
                     for i in range(pipeline_para_size):
                         if not finished[i]:
                             rem += 1
+                    print(f"rem is {rem}")
+            elif (rem==0 and scheduled==args.num_requests):
+                print(f"Process {rank}, all requests done!")
+                torch.distributed.barrier()
+                model.cleanup()
+                server.terminate()
+                return
+            elif (rem==0 and args.num_requests - scheduled < num_to_schedule):
+                num_to_schedule = args.num_requests - scheduled
         except Exception:
             print("---- Got an exception! Time to reset!")
             rtime = time.time()
@@ -555,6 +579,20 @@ def main():
             gpt_generate_fn(model, ubatch_size, max_context_len,  cur_input_ids, cur_input_lengths, cur_output_lengths, finished, cur_ubatch_ids)
             prep_time = time.time()-start_time
             print(f"[BENCHMARK-{rank}] Warmup took {time.time()-wtime} sec")
+
+            scheduled_tensor = torch.tensor(scheduled, dtype=torch.int32)
+            if args.backend == "nccl":
+                scheduled_tensor = scheduled_tensor.cuda()
+            if args.backend == "nccl":
+                tensor_list = [torch.zeros(1, dtype=torch.int32).cuda() for _ in range(world_size)]
+            else:
+                tensor_list = [torch.zeros(1, dtype=torch.int32) for _ in range(world_size)]
+            torch.distributed.all_gather(tensor_list, scheduled_tensor)
+            tensor_list = [x.item() for x in tensor_list]
+            scheduled = max(tensor_list)
+
+            print(f"Scheduled is {scheduled}")
+
 
 
 

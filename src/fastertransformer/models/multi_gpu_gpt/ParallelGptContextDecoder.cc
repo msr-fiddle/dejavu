@@ -374,13 +374,18 @@ void ParallelGptContextDecoder<T>::copy_thread_func(int    ite,
 {
 
     while (1) {
-        // TODO: when to set restart?
         while (!restart[ite].load()) {
             if (thread_done_) {
                 restart[ite] = false;
                 return;
             }
         }
+
+        // also wait here
+        if (ite > 0) {
+            while (restart[ite-1].load());
+        }
+
         for (uint l = 0; l < num_layer_; l++) {
             if (isValidLayerParallelId(l) == false)
                 continue;

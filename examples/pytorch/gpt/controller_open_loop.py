@@ -18,6 +18,7 @@ sys.path.append(os.path.join(dir_path, "../../.."))
 import examples.pytorch.gpt.utils.gpt_token_encoder as encoder
 from examples.pytorch.gpt.api.api_client import ApiClient
 from examples.pytorch.gpt.api.api_server import API_SERVER_PORT
+from math import ceil
 
 torch.classes.load_library(os.path.abspath('./lib/libth_transformer.so'))
 
@@ -100,6 +101,7 @@ def main():
     rps = args.rps
     tensor_parallelism = args.tensor_parallelism
     with_ft = args.with_ft
+    num_pp_peers = num_peers//tensor_parallelism
 
     def get_input(input_len):
         # Inputs
@@ -171,9 +173,8 @@ def main():
     print("Start scheduling!")
 
     total_start = time.time()
-    num_pp_peers = num_peers//tensor_parallelism
 
-    num_batches = int(num_requests/num_pp_peers)
+    num_batches = ceil(num_requests/num_pp_peers)
     to_schedule = num_batches
     done = 0
 
@@ -183,7 +184,9 @@ def main():
             for i in range(done,num_batches):
                 print(f"Batch {i}, sleep for {sleep_times[i]}")
                 time.sleep(sleep_times[i])
-                for j in range(num_pp_peers):
+                num_ubatches = min(num_pp_peers, num_requests-i*num_pp_peers)
+                print(f"Num ubatches is {num_ubatches}")
+                for j in range(num_ubatches):
                     idx = i*num_pp_peers + j
                     cur_input_ids = input_ids[idx]
                     cur_input_lengths = input_lengths[idx]
@@ -248,6 +251,10 @@ def main():
 
     with open('normalized_latencies.json', 'w') as f:
         json.dump(normalized_latencies, f)
+
+
+    # terminate
+    controller.shutdown_server()
 
 if __name__ == "__main__":
     main()

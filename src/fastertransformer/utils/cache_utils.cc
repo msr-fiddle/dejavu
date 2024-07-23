@@ -564,7 +564,7 @@ void NCCLCacheManager::fetch(void* dst_address, size_t num_bytes, int src_rank, 
 void MPICacheManager::flush(void* src_address, size_t num_bytes, int dst_rank, void* dst_address, cudaStream_t stream)
 {
     if (dst_address != NULL) {
-        CUDACHECK(cudaMemcpyAsync(dst_address, src_address, num_bytes, cudaMemcpyDeviceToHost, stream));
+        //CUDACHECK(cudaMemcpyAsync(dst_address, src_address, num_bytes, cudaMemcpyDeviceToHost, stream));
     }
     else {
 
@@ -660,7 +660,7 @@ void TCPCacheManager::flush(void* src_address, size_t num_bytes, int dst_rank, v
         ip::tcp::socket*          socket = (*sockets_)[dst_rank];
         boost::system::error_code ec;
 
-        printf("AT TCP FLUSH! SOCKET ADDR IS %p, dst_rank is %d, send %d bytes\n", socket, dst_rank, num_bytes);
+        //printf("AT TCP FLUSH! SOCKET ADDR IS %p, dst_rank is %d, send %d bytes\n", socket, dst_rank, num_bytes);
         size_t bytes_written = write(
             *socket, buffer(src_address, num_bytes), transfer_exactly(num_bytes), ec);  // we need to write num_bytes
         if (ec) {

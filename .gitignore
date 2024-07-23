@@ -1,1 +1,5 @@
 build/*
+models/*
+datasets/*
+__pycache__/
+*.pyc

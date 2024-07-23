@@ -57,6 +57,9 @@ namespace fastertransformer {
 
 void handle_signal(int signal);
 
+static std::vector<void*> replica_cache_;
+static std::vector<void*> mapped_host_addr_;
+
 template<typename T>
 class ParallelGptDVFT: public BaseLayer {
 private:
@@ -81,9 +84,7 @@ private:
 
     std::mutex              mtx_;
     std::condition_variable cv_;
-    std::vector<void*>      mapped_host_addr_;
     std::vector<void*>      recv_host_addr_;
-    std::vector<void*>      replica_cache_;
     int                     prompt_world_size_;
     int                     token_world_size_;
     int                     prompt_pipeline_size_;
@@ -170,6 +171,7 @@ private:
     std::vector<int>  ubatch_step_restart_;
     std::vector<int>  ubatch_step_end_;
     std::vector<bool> done_;
+    std::vector<bool> ft_done_;
 
     void allocateBuffer() override;
     void allocateBuffer(size_t batch_size,
@@ -204,6 +206,8 @@ private:
     void prompt_receiver();
     void swap_cache_out(size_t step, int local_batch_size, int ubatch_id);
     void swap_cache_in(int ubatch_id, int local_batch_size, int num_microbatches, int prompt_size);
+    void join_thread(std::thread& candidate_thread);
+
 
     void computeContextCumLogProbs(float*                      cum_log_probs,
                                    const T*                    context_decoder_outputs,
@@ -241,7 +245,7 @@ protected:
     std::vector<int*>      sequence_lengths_;
     std::vector<uint32_t*> seq_limit_len_;
     bool*                  microbatch_should_stop_;
-    int                    num_slots_ = 1;  // for swapping
+    int                    num_slots_ = 2;  // for swapping
 
     std::vector<int*> shared_contexts_idx_;
     std::vector<T*>   compact_decoder_features_;
@@ -435,7 +439,6 @@ public:
     void registerCallback(callback_sig* fn, void* ctx);
     void unRegisterCallback();
 
-    void cleanup();
     void reset();
 
     // prompt-token disaggregation

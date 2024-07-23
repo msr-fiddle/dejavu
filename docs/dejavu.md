@@ -6,7 +6,7 @@ We support two ways to compile and run DéjàVu:
 | MPI | Disaggregation, Microbatch swapping
 | Boost | Disaggregation, Fault Tolerance, Microbatch swapping
 
-The DéjàVu consists of a controller and multiple workers, as shown in the following figure
+DéjàVu consists of a controller and multiple workers, as shown in the following figure
 
 TODO: add figure
 
@@ -55,6 +55,9 @@ mpirun -n N -hostfile <hostfile> -x DEJAVU_CONTROLLER_IP=<CONTROLLER_IP> python 
 
 ```
 
+* To read a file trace (e.g. the LMSys dataset used in the DéjàVu paper), add `--input_sizes_file filename`  when starting the controller. The file *filename* is a JSON file, containing a list of [*prompt_size*, *num_generated_tokens*].
+* To submit requests (prompts) following a Poisson distribution (with rps *r*), add `--poisson --rps r`    when starting the controller.
+
 2. Run with disaggregation:
 
 We assume we have *N* workers, tensor parallelism degree *Y*, microbatch size *b*, and we serve *X* requests.
@@ -74,8 +77,9 @@ mpirun -n N -x DEJAVU_CONTROLLER_IP=<CONTROLLER_IP> python ../examples/pytorch/g
 
 ### Enable microbatch swapping
 
-You can enable swapping by adding the '--swapping' flag in the mpirun commands above
+You can enable swapping by just adding the '--swapping' flag in the mpirun commands above (it can be enabled both with and without disaggregation). For the examples in Figure 9 of the paper we run DejaVu without disaggregation. Without microbatch swapping we serve *N* requests, with microbatch *b*. With microbatch swapping, we serve *N/2* requests with microbatch *2b* of homogeneous requests (i.e. all requests have fixed prompt size and generate the same number of tokens).
 
+Note that microbatch swapping is not always beneficial for performance (due to large KV cache transfer overheads over PCIe), as detailed in Appendix G of the paper.
 
 ## Compiling without MPI
 
@@ -113,3 +117,24 @@ export NCCL_COMM_ID=<IP of rank 0>:29512
 python3.8 ../examples/pytorch/gpt/api_worker_open.py  --tensor_para_size=Y --prompt_pipeline_para_size=M//Y --token_pipeline_para_size=K//Y --backend nccl --ckpt_path <path_to_model> --weights_data_type fp16 --inference_data_type fp16 --ubatch_size b --num_requests X --rank i --world_size N --input_len P
 
 ```
+
+
+### Test with failures
+
+Fault-tolerance is supported in the non-MPI version of DéjàVu.
+To showcase DéjàVu's behavior in case of failures, you can:
+
+* Kill all DéjàVu-related processes in a node.
+* The remaining processes will do some cleanup (can be observed from output messages)
+
+Currently, DéjàVu supports only **static** allocation, meaning that the alive processes will wait until the failed process restarts.
+* Restart the failed process by
+
+```bash
+
+python3.8 ../examples/pytorch/gpt/api_worker_open.py  --tensor_para_size=Y --prompt_pipeline_para_size=M//Y --token_pipeline_para_size=K//Y --backend nccl --ckpt_path <path_to_model> --weights_data_type fp16 --inference_data_type fp16 --ubatch_size b --num_requests X --rank i --world_size N --input_len P
+
+```
+changing the variables accordingly, and add the '--restart' and '--failures *F*' option, if this is the *F* inference restart.
+
+For our experiments in Figures 10 and 11, we used background processes (replicas) for DéjàVu. For example, to test inference with 3 failures, you can start 3 background (replica) processes as shown above setting *F=1,2,3* when invoking each of the processes.

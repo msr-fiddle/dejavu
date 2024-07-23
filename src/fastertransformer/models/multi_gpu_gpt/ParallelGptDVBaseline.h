@@ -191,7 +191,7 @@ protected:
     std::vector<int*>      sequence_lengths_;
     std::vector<uint32_t*> seq_limit_len_;
     bool*                  microbatch_should_stop_;
-    int                    num_slots_ = 1;  // for swapping
+    int                    num_slots_ = 2;  // for swapping
 
     std::vector<int*> shared_contexts_idx_;
     std::vector<T*>   compact_decoder_features_;
@@ -293,6 +293,7 @@ protected:
 
 public:
     ControllerClient* controller_client_ = NULL;
+    std::atomic_bool comp_done_;
 
     ParallelGptDVBaseline(size_t               max_batch_size,
                           size_t               max_seq_len,
@@ -355,6 +356,9 @@ public:
 
     void registerCallback(callback_sig* fn, void* ctx);
     void unRegisterCallback();
+
+    void reset();
+
 };
 
 }  // namespace fastertransformer

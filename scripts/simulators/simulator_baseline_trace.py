@@ -15,6 +15,8 @@ parser.add_argument('--trace_file', type=str, default='',
                     help='input trace file')
 parser.add_argument('--rps', type=float, default=0.0,
                     help='rps for Poisson')
+parser.add_argument('--do_traces', action='store_true', help="Create traces of execution")
+
 
 class BatchInfo:
     def __init__(self, stage, batch, prompt, start_time, tokens, initial_tokens) -> None:
@@ -53,7 +55,6 @@ def generate_timestamps(size, rps, num_peers):
         sleep_times = np.random.exponential(scale=1/rps, size=size)
     else:
         sleep_times = [0]*size
-    #print(sleep_times)
     sleep_times = [x*1000000 for x in sleep_times]
     batches = size//num_peers
     req_start_times = [0]*size
@@ -65,99 +66,44 @@ def generate_timestamps(size, rps, num_peers):
     return req_start_times
 
 
-def create_trace(args):
-    events = []
-    with open(args.trace_file, 'r') as f:
-        trace_list = json.load(f)
+def simulate(trace_list, rps, num_machines, prompt_time, token_time, do_traces=False):
 
-    trace_list = [min(max(x[1],2),200) for x in trace_list[:500]]
-    # trace_list_new = []
-    # for x in trace_list:
-    #     for i in range(1):
-    #         trace_list_new.append(x)
-    # trace_list = trace_list_new
-    print(len(trace_list), np.average(trace_list))
+    prompt_time_us = prompt_time * 1000
+    token_time_us = token_time * 1000
 
-    prompt_time_us = args.prompt_time * 1000
-    token_time_us = args.token_time * 1000
-
-    req_start_times = generate_timestamps(len(trace_list), args.rps, args.num_machines)
+    req_start_times = generate_timestamps(len(trace_list), rps, num_machines)
     req_end_times = [0]*len(trace_list)
 
-    batches = args.num_machines
+    batches = num_machines
     active_queue = []
-
-    # cur_start = 0
-    # real_starts = req_start_times
-    # for i in range(len(trace_list)):
-    #     if (cur_start < real_starts[i]):
-    #         cur_start = real_starts[i]
-    #     cur_start += token_time_us * trace_list[i]
-    #     req_end_times[i] = cur_start
-    #     print(req_end_times[i], req_start_times[i])
-    # max_time = cur_start
 
     for i in range(batches):
         active_queue.append(BatchInfo(0, i, True, i*prompt_time_us, trace_list[i], trace_list[i]))
     trace_idx = batches
 
-    cur_time = [0]*args.num_machines
+    cur_time = [0]*num_machines
     max_time = 0
+    early_stops = 0
 
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 0,
-            "args": {
-                "name" : "Stage 1",
+    if do_traces:
+        events = []
+        for i in range(args.num_machines):
+            event_i = {
+                "name": "process_name",
+                "ph": "M",
+                "pid": i,
+                "args": {
+                    "name" : f"Stage {i}",
+                }
             }
-        }
-    )
-
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 1,
-            "args": {
-                "name" : "Stage 2"
-            }
-        }
-    )
-
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 2,
-            "args": {
-                "name" : "Stage 3"
-            }
-        }
-    )
-
-    events.append(
-        {
-            "name": "process_name", "ph": "M", "pid": 3,
-            "args": {
-                "name" : "Stage 4"
-            }
-        }
-    )
+            events.append(event_i)
 
     while (len(active_queue) > 0):
-        # min_ts = active_queue[0].start_time
-        # min_idx = 0
-        # for i in range(len(active_queue)):
-        #     if active_queue[i].start_time < min_ts:
-        #         min_ts = active_queue[i].start_time
-        #         min_idx = i
-        # req = active_queue[i]
-        # active_queue.pop(i)
-
         sleep = True
         for idx,req in enumerate(active_queue):
-            if req.prompt and cur_time[0] < req.start_time:
-                continue
-            else:
-                active_queue.pop(idx)
-                sleep = False
-                break
+            active_queue.pop(idx)
+            sleep = False
+            break
 
         if sleep:
             cur_time[0] = req_start_times[trace_idx-1]
@@ -168,36 +114,42 @@ def create_trace(args):
 
         max_time = max(max_time, time_done)
 
-        #add at trace
-        # events.append({
-        #     "pid": req.stage,
-        #     "ts": max(req.start_time, cur_time[req.stage]),
-        #     "dur": prompt_time_us if req.prompt else token_time_us,
-        #     "ph":"X",
-        #     "name": f"p{req.batch}" if req.prompt else f"t{req.batch},{trace_list[req.batch] - req.tokens}",
-        #     "cname": trace_colors[req.stage]
-        # })
+        if do_traces:
+            #add at trace
+            events.append({
+                "pid": req.stage,
+                "ts": max(req.start_time, cur_time[req.stage]),
+                "dur": prompt_time_us if req.prompt else token_time_us,
+                "ph":"X",
+                "name": f"p{req.batch}" if req.prompt else f"t{req.batch},{trace_list[req.batch] - req.tokens}",
+                "cname": trace_colors[req.stage]
+            })
 
         cur_time[req.stage] = max(req.start_time, cur_time[req.stage])
         cur_time[req.stage] += prompt_time_us if req.prompt else token_time_us
 
-        next_stage = (req.stage + 1) % args.num_machines
+        next_stage = (req.stage + 1) % num_machines
         new_req = None
 
         if req.prompt:
-            if req.stage < args.num_machines - 1:
+            if req.stage < num_machines - 1:
                 new_req = BatchInfo(next_stage, req.batch, True, cur_time[req.stage], req.tokens, req.initial_tokens)
             else:
                 new_req = BatchInfo(next_stage, req.batch, False, cur_time[req.stage], req.tokens, req.initial_tokens)
 
         else:
-            if req.stage < args.num_machines - 1:
+            if req.stage < num_machines - 1:
                 new_req = BatchInfo(next_stage, req.batch, False, cur_time[req.stage], req.tokens, req.initial_tokens)
             else:
                 if req.tokens > 1:
                     new_req = BatchInfo(next_stage, req.batch, False, cur_time[req.stage], req.tokens-1, req.initial_tokens)
                 else:
                     req_end_times[req.batch] = cur_time[req.stage]
+                    for r in active_queue:
+                        if (r.tokens > 2):
+                            early_stops += 1
+                            break
+
                     if trace_idx < len(trace_list):
                         new_req = BatchInfo(0, trace_idx, True, max(cur_time[0], req_start_times[trace_idx]), trace_list[trace_idx], trace_list[trace_idx])
                         trace_idx += 1
@@ -206,9 +158,9 @@ def create_trace(args):
         if new_req is not None:
             active_queue.append(new_req)
 
-
-    # with open(f'../traces/baseline_trace.json', 'w') as f:
-    #     json.dump(events, f)
+    if do_traces:
+        with open(f'baseline_trace.json', 'w') as f:
+            json.dump(events, f)
 
     dur = [(x-y)/1000000 for x,y in zip(req_end_times, req_start_times)]
     req_start_times_sec = [x/1000000 for x in req_start_times]
@@ -216,12 +168,20 @@ def create_trace(args):
 
     # print(req_start_times_sec, req_end_times_sec, dur)
     norm_lat = [x/y for x,y in zip(dur, trace_list)]
-    print("LAT/TOKEN: ", np.median(norm_lat),max(norm_lat), min(norm_lat))
+    print(f"LAT/TOKEN: median: {np.median(norm_lat)}, max: {max(norm_lat)}, min: {min(norm_lat)}")
 
     max_time = max(req_end_times)
+    print(f"------------------------------------------------ Early stops is {early_stops}")
     print(f"Total time is {max_time/1e6} sec, thr is {len(trace_list)/(max_time/1e6)} ubatces/sec")
+    return max_time/1e6
 
 
 if __name__ == "__main__":
-    userargs = parser.parse_args()
-    create_trace(userargs)
+    args = parser.parse_args()
+    events = []
+    with open(args.trace_file, 'r') as f:
+        trace_list = json.load(f)
+
+    trace_list = [min(max(x[1],2),1000) for x in trace_list[:512]]
+    print(len(trace_list), np.average(trace_list))
+    simulate(trace_list, args.rps, args.num_machines, args.prompt_time, args.token_time, args.do_traces)

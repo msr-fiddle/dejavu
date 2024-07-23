@@ -39,41 +39,26 @@ template<typename T>
 void ParallelGptDVFT<T>::gpu_sync(cudaStream_t stream)
 {
 #ifdef STREAM_SYNC
-    cudaStreamSynchronize(stream);
+    CUDACHECK(cudaStreamSynchronize(stream));
 #else
     sync_check_cuda_error();
 #endif
 }
 
+
+template<typename T>
+void ParallelGptDVFT<T>::join_thread(std::thread& candidate_thread)
+{
+    if (candidate_thread.joinable()) {
+        candidate_thread.join();
+    }
+}
+
+
 template<typename T>
 void ParallelGptDVFT<T>::gpu_sync_stream(cudaStream_t stream, ncclComm_t comm)
 {
-    cudaError_t  cudaErr;
-    ncclResult_t ncclErr, ncclAsyncErr;
-    // printf("INSIDE gpu_sync_stream\n");
     CUDACHECK(cudaStreamSynchronize(stream));
-    // while (1) {
-    //     cudaErr = cudaStreamQuery(stream);
-    //     if (cudaErr == cudaSuccess)
-    //         return;
-
-    //     ncclErr = ncclCommGetAsyncError(comm, &ncclAsyncErr);
-    //     if (ncclErr != ncclSuccess) {
-    //         printf("NCCL Error : ncclCommGetAsyncError returned %d\n", ncclErr);
-    //         throw std::runtime_error("NCCL FAILURE - THROW ERROR!");
-    //     }
-
-    //     if (ncclAsyncErr != ncclSuccess || reset_) {
-    //         // An asynchronous error happened. Stop the operation and destroy
-    //         // the communicator
-    //         ncclErr = ncclCommAbort(comm);
-    //         if (ncclErr != ncclSuccess)
-    //             printf("NCCL Error : ncclCommDestroy returned %d\n", ncclErr);
-    //         // Caller may abort or try to re-create a new communicator.
-    //         throw std::runtime_error("CUDA FAILURE - THROW ERROR!");
-    //     }
-    // }
-    // printf("EXIT gpu_sync_stream\n");
 }
 
 template<typename T>
@@ -81,10 +66,19 @@ void ParallelGptDVFT<T>::initialize()
 {
 
     CUDACHECK(cudaGetDeviceCount(&num_devices_));
-
-    for (int i = 0; i < pipeline_para_.world_size_; i++)
-        mapped_host_addr_.push_back(nullptr);
     bool is_prompt = cache_stream_para_.world_size_ > 1 && cache_stream_para_.rank_ < prompt_world_size_;
+
+    if (mapped_host_addr_.empty()) {
+        for (int i = 0; i < pipeline_para_.world_size_; i++)
+            mapped_host_addr_.push_back(nullptr);
+    }
+    else {
+        if (is_prompt) {
+            for (int i = 0; i < pipeline_para_.world_size_; i++)
+                mapped_host_addr_[i] = nullptr;
+        }
+
+    }
 
     gpt_context_decoder_ = new ParallelGptContextDecoder<T>(0,
                                                             0,
@@ -165,6 +159,8 @@ template<typename T>
 void ParallelGptDVFT<T>::initializeVectors(const size_t num_microbatches)
 {
 
+    bool allocate_replica_cache = replica_cache_.empty();
+
     for (size_t i = 0; i < num_microbatches; i++) {
         tiled_total_padding_count_.push_back(nullptr);
         tiled_input_attention_mask_.push_back(nullptr);
@@ -215,7 +211,9 @@ void ParallelGptDVFT<T>::initializeVectors(const size_t num_microbatches)
 
         dynamic_decode_layer_.push_back(nullptr);
         recv_host_addr_.push_back(nullptr);
-        replica_cache_.push_back(nullptr);
+
+        if (allocate_replica_cache)
+            replica_cache_.push_back(nullptr);
 
         key_swapping_events_.push_back(nullptr);
         value_swapping_events_.push_back(nullptr);
@@ -244,6 +242,7 @@ void ParallelGptDVFT<T>::allocateBuffer(size_t batch_size,
         if (global_iteration_ == 0) {
             ubatch_phase_.push_back(false);
             done_.push_back(false);
+            ft_done_.push_back(false);
             ubatch_step_.push_back(max_input_len);
             ubatch_step_start_.push_back(max_input_len);
             ubatch_step_restart_.push_back(max_input_len);
@@ -272,6 +271,9 @@ void ParallelGptDVFT<T>::allocateBuffer(size_t batch_size,
     if (gpt_variant_params_.use_attention_linear_bias) {
         linear_bias_slopes_ = (T*)(allocator_->reMalloc(linear_bias_slopes_, sizeof(T) * head_num_, false));
     }
+
+    const size_t replica_cache_size =
+            peer_layers_per_pp_ * batchxbeam * memory_len * hidden_units_ / tensor_para_.world_size_;
 
     // 2. setup
     for (int i = 0; i < num_microbatches; i++) {
@@ -374,9 +376,9 @@ void ParallelGptDVFT<T>::allocateBuffer(size_t batch_size,
             (int*)allocator_->reMalloc(tiled_total_padding_count_[i], batchxbeam * sizeof(int), false);
 
         // at CPU
-        const size_t replica_cache_size =
-            peer_layers_per_pp_ * batchxbeam * memory_len * hidden_units_ / tensor_para_.world_size_;
-        replica_cache_[i] = (char*)calloc(2 * replica_cache_size, sizeof(T));
+        if (replica_cache_[i] == nullptr) {
+            replica_cache_[i] = (char*)calloc(2 * replica_cache_size, sizeof(T));
+        }
 
         dynamic_decode_layer_[i] = new DynamicDecodeLayer<float>(vocab_size_,
                                                                  vocab_size_padded_,
@@ -482,7 +484,6 @@ void ParallelGptDVFT<T>::freeBuffer()
                 allocator_->free((void**)(&compact_size_[i]));
             }
             allocator_->free((void**)(&tiled_total_padding_count_[i]));
-            free(replica_cache_[i]);
 
             CUDACHECK(cudaEventDestroy(*(key_swapping_events_[i])));
             free(key_swapping_events_[i]);
@@ -633,12 +634,22 @@ template<typename T>
 ParallelGptDVFT<T>::~ParallelGptDVFT()
 {
     printf("Inside ParallelGptDVFT destructor\n");
+
+    if (prompt_only_) {
+        gpt_context_decoder_->thread_done_ = true;
+
+        int num_microbatches = gpt_context_decoder_->stream_threads_.size();
+        for (int i = 0; i < num_microbatches; i++)
+            join_thread(gpt_context_decoder_->stream_threads_[i]);
+    }
+
     delete gpt_decoder_;
     delete gpt_context_decoder_;
     printf("At ParallelGptDVFT destructor, before freeBuffer\n");
     freeBuffer();
+
     printf("At ParallelGptDVFT destructor, free mem\n");
-    if (mapped_host_addr_[0] != NULL) {
+    if (prompt_only_ && mapped_host_addr_[0] != NULL) {
         CUDACHECK(cudaHostUnregister(mapped_host_addr_[0]));
         free(mapped_host_addr_[0]);
     }
@@ -670,15 +681,13 @@ ParallelGptDVFT<T>::~ParallelGptDVFT()
         prompt_recv_socket_->close();
     printf("At ParallelGptDVFT destructor, closed rest sockets \n");
 
-    // recv_thread_.join();
-    // stream_thread_.join();
-
     printf("At ParallelGptDVFT destructor, delete cache managers\n");
     if (ds_cache_manager_ != nullptr)
         delete ds_cache_manager_;
     if (local_cache_manager_ != nullptr)
         delete local_cache_manager_;
     printf("EXIT ParallelGptDVFT destructor\n");
+
 }
 
 template<typename T>
@@ -772,7 +781,7 @@ void ParallelGptDVFT<T>::computeContextCumLogProbs(float*                      c
                             tensor_para_.rank_,
                             tensor_para_,
                             stream_);
-            check_cuda_error(cudaStreamSynchronize(stream_));
+            CUDACHECK(cudaStreamSynchronize(stream_));
             gpu_sync_stream(stream_, pipeline_para_.nccl_comm_);
 
             invokeTransposeAxis01(lp_logits_buf_[ite],
@@ -883,11 +892,11 @@ void ParallelGptDVFT<T>::copy_token_to_replica(int start_step, int ubatch_id, in
                        (char*)(mapped_host_addr_[ubatch_id]) + total_cache_size_};
     local_cache_manager_->stream_out(task);
 
-    printf("************************ [SENDER %d] Send token for step %d, ubatch id %d, to rank %d\n",
-           cache_stream_para_.rank_,
-           start_step,
-           ubatch_id,
-           peer);
+    // printf("************************ [SENDER %d] Send token for step %d, ubatch id %d, to rank %d\n",
+    //        cache_stream_para_.rank_,
+    //        start_step,
+    //        ubatch_id,
+    //        peer);
 
     local_cache_manager_->flush(mapped_host_addr_[ubatch_id] + start_step * token_cache_size_,
                                 token_cache_size_,
@@ -907,7 +916,7 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
     if (prompt_only_ || pipeline_para_.world_size_ == 1)
         return;
 
-    printf("[TOKEN-SENDER] Starting ....\n");
+    //printf("[TOKEN-SENDER] Starting ....\n");
 
     int peer = prompt_world_size_ + ((pipeline_para_.rank_ + 1) * tensor_para_.world_size_) % token_world_size_
                + tensor_para_.rank_;
@@ -928,8 +937,21 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
                 break;
         }
 
+        //printf("**************** [SENDER %d] START\n", cache_stream_para_.rank_);
+
+
         // 1. send prompt
         for (int i = 0; i < num_microbatches; i++) {
+
+            if (ft_done_[i]) {
+                if (pipeline_para_.rank_ % 2 != 0) {
+                    recv_[(i + 1) % pipeline_para_.world_size_] = 1;
+                }
+                else {
+                    recv_[i] = 1;
+                }
+                continue;
+            }
 
             if (pipeline_para_.rank_ % 2 != 0) {
                 while (recv_[i]) {
@@ -950,12 +972,12 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
 
             if (ubatch_step_restart_[i] == ubatch_step_start_[i]) {
 
-                printf("**************** [SENDER %d] %d, Ubatch %d, Send prompt to %d, size is %d\n",
-                       cache_stream_para_.rank_,
-                       global_iteration_,
-                       i,
-                       peer,
-                       max_context_len * token_cache_size_);
+                // printf("**************** [SENDER %d] %d, Ubatch %d, Send prompt to %d, size is %d\n",
+                //        cache_stream_para_.rank_,
+                //        global_iteration_,
+                //        i,
+                //        peer,
+                //        max_context_len * token_cache_size_);
 
                 local_cache_manager_->flush(
                     mapped_host_addr_[i], max_context_len * token_cache_size_, peer, NULL, flush_key_stream_);
@@ -975,17 +997,25 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
         }
 
         for (int i = 0; i < num_microbatches; i++)
-            done[i] = false;
+            done[i] = ft_done_[i];
 
         while (1) {
-            bool all_done = false;
+            bool all_done = true;
             for (int i = 0; i < num_microbatches; i++) {
 
                 if (thread_done_)
                     return;
 
-                if (done[i])
+                if (done[i]) {
+                    //printf("[SENDER] UBATCH %d IGNORE\n", i);
+                    if (pipeline_para_.rank_ % 2 != 0) {
+                        recv_[(i + 1) % pipeline_para_.world_size_] = 1;
+                    }
+                    else {
+                        recv_[i] = 1;
+                    }
                     continue;
+                }
 
                 while (1) {
                     step_mtx_.lock();
@@ -1030,15 +1060,21 @@ void ParallelGptDVFT<T>::stream_cache_func(int num_microbatches, int max_context
                 copy_step[i] += 1;  // ubatch_step_[i];
                 if (copy_step[i] == ubatch_step_end_[i]) {
                     done[i]      = true;
-                    all_done     = true;
                     copy_step[i] = max_context_len;
+                }
+                else {
+                    all_done = false;
                 }
             }
             if (all_done)
                 break;
         }
         stream_restart_ = false;
-        // printf("************************ [SENDER %d] OK\n", cache_stream_para_.rank_);
+
+        if (thread_done_)
+            return;
+
+        //printf("************************ [SENDER %d] OK\n", cache_stream_para_.rank_);
     }
 }
 
@@ -1081,7 +1117,7 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                                             int local_batch_size)
 {
 
-    printf("[TOKEN-RECEIVER] Starting ....\n");
+    //printf("[TOKEN-RECEIVER] Starting ....\n");
 
     MPI_Status status;
     if (prompt_only_ || pipeline_para_.world_size_ == 1)
@@ -1109,17 +1145,25 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
                 break;
         }
 
+        //printf("**************** [RECEIVER %d] START\n", cache_stream_para_.rank_);
+
         // 1. get prompt
         for (int i = 0; i < num_microbatches; i++) {
             while (!recv_[i]) {
                 if (thread_done_)
                     return;
             }
-            printf("**************** [RECEIVER %d] Get prompt for ubatch %d from %d, size is %d\n",
-                   cache_stream_para_.rank_,
-                   i,
-                   peer,
-                   replica_prompt_cache_size);
+
+            if (ft_done_[i]) {
+                recv_[i] = false;
+                continue;
+            }
+
+            // printf("**************** [RECEIVER %d] Get prompt for ubatch %d from %d, size is %d\n",
+            //        cache_stream_para_.rank_,
+            //        i,
+            //        peer,
+            //        replica_prompt_cache_size);
             if (ubatch_step_restart_[i] == ubatch_step_start_[i]) {
                 get_token_from_replica((char*)(replica_cache_[i]), replica_prompt_cache_size, peer);
                 controller_mtx_.lock();
@@ -1131,44 +1175,51 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
         }
 
         for (int i = 0; i < num_microbatches; i++)
-            done[i] = false;
+            done[i] = ft_done_[i];
 
         // 2. get per token
         while (1) {
-            bool all_done = false;
+            bool all_done = true;
             for (int i = 0; i < num_microbatches; i++) {
 
                 if (thread_done_)
                     return;
 
-                if (done[i])
+                if (done[i]) {
+                    //printf("[RECEIVER] UBATCH %d IGNORE\n", i);
+                    recv_[i] = false;
                     continue;
+                }
 
                 while (!recv_[i]) {
                     if (thread_done_)
                         return;
                 }
-                printf(
-                    "========================== [RECEIVER %d] Get token for step %d, ubatch %d from %d, addr is %p, size is %d\n",
-                    cache_stream_para_.rank_,
-                    copy_step[i],
-                    i,
-                    peer,
-                    replica_cache_[i],
-                    replica_token_cache_size_);
+
+
+                // printf(
+                //     "========================== [RECEIVER %d] Get token for step %d, ubatch %d from %d, addr is %p, size is %d\n",
+                //     cache_stream_para_.rank_,
+                //     copy_step[i],
+                //     i,
+                //     peer,
+                //     replica_cache_[i],
+                //     replica_token_cache_size_);
                 get_token_from_replica((char*)(replica_cache_[i]) + copy_step[i] * replica_token_cache_size_,
                                        replica_token_cache_size_,
                                        peer);
-                recv_[i] = false;
                 controller_mtx_.lock();
                 controller_client_->SendCacheReceived(cache_stream_para_.rank_, ubatch_global_id_[i], copy_step[i]);
                 controller_mtx_.unlock();
 
+                recv_[i] = false;
                 copy_step[i] += 1;
                 if (copy_step[i] == ubatch_step_end_[i]) {
                     done[i]      = true;
-                    all_done     = true;
                     copy_step[i] = max_context_len;
+                }
+                else {
+                    all_done = false;
                 }
             }
             if (all_done)
@@ -1177,16 +1228,23 @@ void ParallelGptDVFT<T>::receive_cache_func(int num_microbatches,
 
         j++;
         recv_restart_ = false;
-        // printf("========================== [RECEIVER %d] OK\n", cache_stream_para_.rank_);
+
+        if (thread_done_)
+            return;
+
+        //printf("========================== [RECEIVER %d] OK\n", cache_stream_para_.rank_);
     }
 }
 
 template<typename T>
 void ParallelGptDVFT<T>::prompt_receiver()
 {
-    printf("[BOOST] PROMT RECEIVER THREAD!\n");
+    //printf("[BOOST] PROMT RECEIVER THREAD!\n");
 
     while (1) {
+
+        if (thread_done_)
+            return;
 
         // get slot id
         boost::system::error_code ec;
@@ -1197,7 +1255,7 @@ void ParallelGptDVFT<T>::prompt_receiver()
             printf("BOOST ERROR OCCURED WHILE READING!\n");
             return;
         }
-        printf("------------------ GOT SLOT ID %d\n", slot_id);
+        //printf("------------------ GOT SLOT ID %d\n", slot_id);
 
         // get per_layer
 
@@ -1223,7 +1281,7 @@ void ParallelGptDVFT<T>::prompt_receiver()
                 printf("BOOST ERROR OCCURED WHILE READING!\n");
                 return;
             }
-            printf("Layer %d, got %d bytes, per_layer_prompt_size_ is %d\n", l, num_read, per_layer_prompt_size_);
+            //printf("Layer %d, got %d bytes, per_layer_prompt_size_ is %d\n", l, num_read, per_layer_prompt_size_);
         }
 
         // this is an extra copy, can optimize later
@@ -1235,6 +1293,7 @@ void ParallelGptDVFT<T>::prompt_receiver()
         dejavu_grpc_service_.written_mtx_.lock();
         dejavu_grpc_service_.written_queue_.push(slot_id);
         dejavu_grpc_service_.written_mtx_.unlock();
+
     }
 }
 
@@ -1263,22 +1322,27 @@ void ParallelGptDVFT<T>::monitor_nccl()
                 thread_done_ = true;
 
                 if (token_only_) {
-                    recv_thread_.join();
-                    stream_thread_.join();
+                    join_thread(recv_thread_);
+                    join_thread(stream_thread_);
                     if (prompt_world_size_ > 0)
-                        prompt_boost_thread_.join();
+                        join_thread(prompt_boost_thread_);
                 }
                 else if (prompt_only_) {
                     gpt_context_decoder_->thread_done_ = true;
 
                     int num_microbatches = gpt_context_decoder_->stream_threads_.size();
                     for (int i = 0; i < num_microbatches; i++)
-                        (gpt_context_decoder_->stream_threads_[i]).join();
+                        join_thread(gpt_context_decoder_->stream_threads_[i]);
                 }
 
                 printf("Stream threads joined!\n");
 
+                cudaStreamSynchronize(fetch_key_stream_);
+                cudaStreamSynchronize(fetch_value_stream_);
+                cudaStreamSynchronize(flush_key_stream_);
+                cudaStreamSynchronize(flush_value_stream_);
                 cudaStreamDestroy(stream_);
+
                 cudaStreamDestroy(fetch_key_stream_);
                 cudaStreamDestroy(fetch_value_stream_);
                 cudaStreamDestroy(flush_key_stream_);
@@ -1287,11 +1351,15 @@ void ParallelGptDVFT<T>::monitor_nccl()
                 printf("CUDA Streams destroyed\n");
 
                 ncclCommAbort(pipeline_para_.nccl_comm_);
+
                 if (tensor_para_.nccl_comm_ != nullptr)
                     ncclCommAbort(tensor_para_.nccl_comm_);
-                ncclCommAbort(cache_stream_para_.nccl_comm_);
 
-                printf("Comm destroyed!\n");
+                ncclCommAbort(cache_stream_para_.nccl_comm_);
+                printf("All Comm destroyed!\n");
+
+                //CUDACHECK(cudaDeviceSynchronize());
+                //CUDACHECK(cudaGetLastError());
 
                 throw std::runtime_error("NCCL ERROR - ABORT!");
             }
@@ -1309,7 +1377,7 @@ template<typename T>
 void ParallelGptDVFT<T>::exchangeCaches(int start_step, int num_microbatches, int local_batch_size, int prompt_size)
 {
 
-    printf("Inside exchangeCaches\n");
+    //printf("Inside exchangeCaches\n");
 
     std::vector<int> layers(layers_per_pp_);
     for (int l = 0; l < layers_per_pp_; l++)
@@ -1597,12 +1665,12 @@ void ParallelGptDVFT<T>::swap_cache_in(int ubatch_id, int local_batch_size, int 
             mapped_host_addr_[idx_to_fetch] + total_cache_size_};
     swapping_cache_manager_->stream_in(task);
 
-    cudaEventRecord(*key_swapping_events_[idx_to_fetch], fetch_key_stream_);
-    cudaEventRecord(*value_swapping_events_[idx_to_fetch], fetch_value_stream_);
+    CUDACHECK(cudaEventRecord(*key_swapping_events_[idx_to_fetch], fetch_key_stream_));
+    CUDACHECK(cudaEventRecord(*value_swapping_events_[idx_to_fetch], fetch_value_stream_));
 
     if (num_slots_ == 1) {
-        cudaStreamSynchronize(fetch_key_stream_);
-        cudaStreamSynchronize(fetch_value_stream_);
+        CUDACHECK(cudaStreamSynchronize(fetch_key_stream_));
+        CUDACHECK(cudaStreamSynchronize(fetch_value_stream_));
     }
 
     auto                         endm    = high_resolution_clock::now();
@@ -2054,11 +2122,11 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 
         if (mapped_host_addr_[0] == NULL) {
 
-            cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking));
 
-            cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking));
 
             mapped_host_addr_[0] = malloc(num_microbatches * prompt_buffer_size_ * 2 * total_cache_size_);
             CUDACHECK(cudaHostRegister(mapped_host_addr_[0],
@@ -2125,11 +2193,11 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 
         if (recv_host_addr_[0] == NULL) {
 
-            cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&fetch_value_stream_, cudaStreamNonBlocking));
 
-            cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking);
-            cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking);
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_key_stream_, cudaStreamNonBlocking));
+            CUDACHECK(cudaStreamCreateWithFlags(&flush_value_stream_, cudaStreamNonBlocking));
 
             // for each microbatch
             // TODO: what exactly to allocate here?
@@ -2193,11 +2261,13 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 #endif
 
             // for CPU-CPU copies to replica
-            mapped_host_addr_[0] = calloc(2 * num_microbatches * total_cache_size_, 1);
-            CUDACHECK(cudaHostRegister(
-                mapped_host_addr_[0], 2 * num_microbatches * total_cache_size_, cudaHostRegisterDefault));
-            for (int i = 1; i < num_microbatches; i++) {
-                mapped_host_addr_[i] = (char*)(mapped_host_addr_[0]) + i * 2 * total_cache_size_;
+            if (mapped_host_addr_[0] == NULL) {
+                mapped_host_addr_[0] = calloc(2 * num_microbatches * total_cache_size_, 1);
+                CUDACHECK(cudaHostRegister(
+                    mapped_host_addr_[0], 2 * num_microbatches * total_cache_size_, cudaHostRegisterDefault));
+                for (int i = 1; i < num_microbatches; i++) {
+                    mapped_host_addr_[i] = (char*)(mapped_host_addr_[0]) + i * 2 * total_cache_size_;
+                }
             }
 
 #ifdef WITH_BOOST
@@ -2427,6 +2497,7 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
             ubatch_step_restart_[i] = max_input_length;
             uint8_t* ptr            = input_tensors->at("finished").getPtr<uint8_t>();
             done_[i]                = *(ptr + i);
+            ft_done_[i]             = done_[i]; // for replication
         }
         else {
             ubatch_step_restart_[i] = ubatch_step_[i];
@@ -2483,14 +2554,14 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
         if (ubatch_phase_[i])
             continue;
 
-        cudaMemsetAsync(output_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_);
-        cudaMemsetAsync(parent_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_);
-        cudaMemsetAsync(
-            tiled_masked_tokens_[i], false, sizeof(bool) * local_batch_size * beam_width * memory_len_, stream_);
-        cudaMemsetAsync(tiled_total_padding_count_[i], 0, sizeof(int) * local_batch_size * beam_width, stream_);
+        CUDACHECK(cudaMemsetAsync(output_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_));
+        CUDACHECK(cudaMemsetAsync(parent_ids_buf_[i], 0, sizeof(int) * local_batch_size * beam_width * session_len, stream_));
+        CUDACHECK(cudaMemsetAsync(
+            tiled_masked_tokens_[i], false, sizeof(bool) * local_batch_size * beam_width * memory_len_, stream_));
+        CUDACHECK(cudaMemsetAsync(tiled_total_padding_count_[i], 0, sizeof(int) * local_batch_size * beam_width, stream_));
         if (beam_width > 1) {
-            cudaMemsetAsync(
-                cache_indirections_[0], 0, 2 * sizeof(int) * local_batch_size * beam_width * memory_len_, stream_);
+            CUDACHECK(cudaMemsetAsync(
+                cache_indirections_[0], 0, 2 * sizeof(int) * local_batch_size * beam_width * memory_len_, stream_));
         }
     }
 
@@ -2736,20 +2807,22 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 
             if (prompt_only_ || cache_stream_para_.world_size_ == 1) {
 
-                for (int i = 0; i < tp_per_pp_; i++) {
-                    printf("Get slot for client %d\n", i);
-                    while (1) {
-                        current_slot_ids_[i] = dejavu_clients_[i]->GetSlot();
-                        if (current_slot_ids_[i] >= 0) {
-                            ds_cache_manager_->prompt_slot_ = current_slot_ids_[i];
-                            break;
+                if (prompt_only_) {
+                    for (int i = 0; i < tp_per_pp_; i++) {
+                        printf("Get slot for client %d\n", i);
+                        while (1) {
+                            current_slot_ids_[i] = dejavu_clients_[i]->GetSlot();
+                            if (current_slot_ids_[i] >= 0) {
+                                ds_cache_manager_->prompt_slot_ = current_slot_ids_[i];
+                                break;
+                            }
+                            else {
+                                if (reset_)
+                                    return;
+                            }
                         }
-                        else {
-                            if (reset_)
-                                return;
-                        }
+                        printf("Rank %d I GOT SLOT %d for client %d\n", cache_stream_para_.rank_, current_slot_ids_[i], i);
                     }
-                    printf("Rank %d I GOT SLOT %d for client %d\n", cache_stream_para_.rank_, current_slot_ids_[i], i);
                 }
                 gpt_context_decoder_->restart[ite] = true;
 
@@ -2946,10 +3019,6 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
     for (int l = 0; l < layers_per_pp_; l++)
         layers[l] = l;
 
-    // for testing
-    // CUDACHECK(cudaDeviceSynchronize());
-    // return;
-
     std::vector<int> finished_pp_ids;
     if (prompt_only_) {
         for (int i = 0; i < num_microbatches; i++) {
@@ -3013,6 +3082,11 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
         for (uint ite = 0; ite < num_microbatches; ++ite) {
 
             if (done_[ite]) {
+#ifdef TEST_FAILURES
+                if (ite == num_microbatches - 1) {
+                    stream_restart_ = true;
+                }
+#endif
                 continue;
             }
 
@@ -3020,7 +3094,7 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
                 if (prompt_world_size_ > 0 && ubatch_step_[ite] == ubatch_step_start_[ite]) {
                     // try to get prompt to work with
                     printf(
-                        "[RANK %d] waiting to get slot id, current slot_id is %d\n", cache_stream_para_.rank_, slot_id);
+                        "[RANK %d] waiting to get slot id for microbatch %d, current slot_id is %d\n", cache_stream_para_.rank_, ite, slot_id);
                     while (1) {
                         dejavu_grpc_service_.written_mtx_.lock();
                         if (!dejavu_grpc_service_.written_queue_.empty()) {
@@ -3535,7 +3609,7 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
     auto                         temp      = high_resolution_clock::now();
     duration<double, std::milli> ms_double = temp - total_startt;
 
-    // printf("[BENCHMARK] RANK %d, TOTAL TOKEN generation took %f ms\n", cache_stream_para_.rank_, ms_double.count());
+    printf("[BENCHMARK] RANK %d, TOTAL TOKEN generation took %f ms\n", cache_stream_para_.rank_, ms_double.count());
 
     // CUDACHECK(cudaDeviceSynchronize());
     gpu_sync_stream(stream_, pipeline_para_.nccl_comm_);
@@ -3759,41 +3833,39 @@ size_t ParallelGptDVFT<T>::getStep()
 }
 
 template<typename T>
-void ParallelGptDVFT<T>::cleanup()
-{
-    thread_done_ = true;
-    comp_done_   = true;
-#ifdef TEST_FAILURES
-    if (token_only_ and pipeline_para_.world_size_ > 1) {
-        stream_thread_.join();
-        recv_thread_.join();
-    }
-    if (dv_server_started_) {
-        printf("SHUT DOWN!\n");
-        Shutdown(std::ref(dejavu_grpc_service_));
-        dv_thread_.join();
-    }
-#endif
-}
-
-template<typename T>
 void ParallelGptDVFT<T>::reset()
 {
-    printf("Inside ParallelGptDVFT destructor\n");
+    printf("Inside ParallelGptDVFT reset\n");
+    thread_done_ = true;
+    comp_done_ = true;
+
+    if (prompt_only_) {
+        gpt_context_decoder_->thread_done_ = true;
+
+        int num_microbatches = gpt_context_decoder_->stream_threads_.size();
+        for (int i = 0; i < num_microbatches; i++)
+            join_thread(gpt_context_decoder_->stream_threads_[i]);
+    }
+
     delete gpt_decoder_;
     delete gpt_context_decoder_;
+
     printf("At ParallelGptDVFT destructor, before freeBuffer\n");
     freeBuffer();
     printf("At ParallelGptDVFT destructor, free mem\n");
-    if (mapped_host_addr_[0] != NULL) {
-        CUDACHECK(cudaHostUnregister(mapped_host_addr_[0]));
-        free(mapped_host_addr_[0]);
-    }
+
     if (recv_host_addr_[0] != NULL)
         free(recv_host_addr_[0]);
 
     if (prompt_boost_address_ != NULL)
         free(prompt_boost_address_);
+
+    if (token_only_) {
+        join_thread(recv_thread_);
+        join_thread(stream_thread_);
+        if (prompt_world_size_ > 0)
+            join_thread(prompt_boost_thread_);
+    }
 
     printf("At ParallelGptDVFT destructor, close sockets (if any)\n");
     if (recv_socket_ != nullptr)
@@ -3817,9 +3889,6 @@ void ParallelGptDVFT<T>::reset()
         prompt_recv_socket_->close();
     printf("At ParallelGptDVFT destructor, closed rest sockets \n");
 
-    // recv_thread_.join();
-    // stream_thread_.join();
-
     printf("At ParallelGptDVFT destructor, delete cache managers\n");
     if (ds_cache_manager_ != nullptr)
         delete ds_cache_manager_;
@@ -3830,8 +3899,9 @@ void ParallelGptDVFT<T>::reset()
     if (dv_server_started_) {
         printf("SHUT DOWN!\n");
         Shutdown(std::ref(dejavu_grpc_service_));
-        dv_thread_.join();
+        join_thread(dv_thread_);
     }
+
 }
 
 template class ParallelGptDVFT<float>;
