@@ -2807,20 +2807,22 @@ void ParallelGptDVFT<T>::forward(std::unordered_map<std::string, Tensor>*       
 
             if (prompt_only_ || cache_stream_para_.world_size_ == 1) {
 
-                for (int i = 0; i < tp_per_pp_; i++) {
-                    printf("Get slot for client %d\n", i);
-                    while (1) {
-                        current_slot_ids_[i] = dejavu_clients_[i]->GetSlot();
-                        if (current_slot_ids_[i] >= 0) {
-                            ds_cache_manager_->prompt_slot_ = current_slot_ids_[i];
-                            break;
+                if (prompt_only_) {
+                    for (int i = 0; i < tp_per_pp_; i++) {
+                        printf("Get slot for client %d\n", i);
+                        while (1) {
+                            current_slot_ids_[i] = dejavu_clients_[i]->GetSlot();
+                            if (current_slot_ids_[i] >= 0) {
+                                ds_cache_manager_->prompt_slot_ = current_slot_ids_[i];
+                                break;
+                            }
+                            else {
+                                if (reset_)
+                                    return;
+                            }
                         }
-                        else {
-                            if (reset_)
-                                return;
-                        }
+                        printf("Rank %d I GOT SLOT %d for client %d\n", cache_stream_para_.rank_, current_slot_ids_[i], i);
                     }
-                    printf("Rank %d I GOT SLOT %d for client %d\n", cache_stream_para_.rank_, current_slot_ids_[i], i);
                 }
                 gpt_context_decoder_->restart[ite] = true;
 
