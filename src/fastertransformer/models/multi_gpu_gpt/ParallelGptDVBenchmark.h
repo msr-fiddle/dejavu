@@ -333,6 +333,8 @@ public:
 
     ~ParallelGptDVBenchmark();
 
+    std::atomic_bool comp_done_;
+
     void forward(std::vector<Tensor>*        output_tensors,
                  const std::vector<Tensor>*  input_tensors,
                  const ParallelGptWeight<T>* gpt_weights);
@@ -351,6 +353,9 @@ public:
 
     void registerCallback(callback_sig* fn, void* ctx);
     void unRegisterCallback();
+
+    void reset();
+
 };
 
 }  // namespace fastertransformer
