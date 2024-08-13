@@ -2693,6 +2693,12 @@ size_t ParallelGptDVBenchmark<T>::getStep()
     return step_;
 }
 
+template<typename T>
+void ParallelGptDVBenchmark<T>::reset() {
+    // just for compile purposes
+    return;
+}
+
 template class ParallelGptDVBenchmark<float>;
 template class ParallelGptDVBenchmark<half>;
 #ifdef ENABLE_BF16
